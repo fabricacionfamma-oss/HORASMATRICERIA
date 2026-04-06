@@ -378,18 +378,392 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
             margin=dict(t=30, b=40, l=10, r=10), 
             height=280, width=580, 
             legend=dict(
-                orientation="h", 
-                yanchor="top", 
-                y=-0.1, 
-                xanchor="center", 
-                x=0.5,
-                title="" # Ocultamos el título de la leyenda para que quede más limpio
-            )
-        )
-    else:
-        fig_trend = go.Figure()
-        fig_trend.update_layout(title=f"Sin datos para la Evolución Anual {s_date.year}", height=280, width=550)
+                orientation="h", import streamlit as st
+import pandas as pd
+import re
+from datetime import datetime, timedelta
+import tempfile
+import os
+import calendar
+import plotly.express as px
+import plotly.graph_objects as go
+from collections import defaultdict
+from fpdf import FPDF
 
+# ==========================================
+# 1. CONFIGURACIÓN Y ESTILOS
+# ==========================================
+st.set_page_config(page_title="Reporte Matricería", layout="centered", page_icon="📅")
+
+st.markdown("""
+<style>
+    .header-style { font-size: 26px; font-weight: bold; margin-bottom: 5px; color: #1F2937; text-align: center; }
+    .section-box { padding: 20px; border-radius: 10px; border: 1px solid #e5e7eb; margin-bottom: 25px; background-color: #f9fafb; }
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown('<div class="header-style">📅 Reporte Gerencial de Matricería</div>', unsafe_allow_html=True)
+st.write("<p style='text-align: center;'>Cálculo de horas de matricería y resumen ejecutivo.</p>", unsafe_allow_html=True)
+st.divider()
+
+# ==========================================
+# 2. ENLACES Y CONSTANTES
+# ==========================================
+SHEETS_CONFIG = [
+    {"url": "https://docs.google.com/spreadsheets/d/1sccnOPuosjMSepp0FZoEGteYArIIhB2fGH7TeSRW_7E/export?format=csv&gid=1128388185", "skiprows": 2, "tipo": "asistencia", "empresa": "FUMISCOR"}, 
+    {"url": "https://docs.google.com/spreadsheets/d/1UNSCxrTy9TUdggNt0ta0TcsEvT3idaRGWcXE_t8J40I/export?format=csv&gid=979884533", "skiprows": 0, "tipo": "asistencia", "empresa": "FAMMA"}, 
+    {"url": "https://docs.google.com/spreadsheets/d/1bL_tnlSXGO_t9tKnhIHT5pZ3DAxivbiq2tFETVxBaVI/export?format=csv&gid=1507213893", "skiprows": 2, "tipo": "correctivo", "empresa": "FUMISCOR"}, 
+    {"url": "https://docs.google.com/spreadsheets/d/1A-0mngZdgvZGbqzWjA_awhrwfvca0K4aGqp5NBAoFAY/export?format=csv&gid=238711679", "skiprows": 0, "tipo": "correctivo", "empresa": "FAMMA"}, 
+    {"url": "https://docs.google.com/spreadsheets/d/1VqsPNhAlT1kPCltbMWsbkZNFBKdwZRFM5RAmnRV0v3c/export?format=csv&gid=1603203990", "skiprows": 2, "tipo": "preventivo", "empresa": "FUMISCOR"}, 
+    {"url": "https://docs.google.com/spreadsheets/d/1MptnOuRfyOAr1EgzNJVygTtNziOSdzXJn-PZDX0pNzc/export?format=csv&gid=324842888", "skiprows": 0, "tipo": "preventivo", "empresa": "FAMMA"} 
+]
+
+VALID_PIEZA_COLS = [
+    'PIEZAS RENAULT', 'PIEZAS FAURECIA', 'PIEZAS FIAT', 'PIEZAS DENSO', 
+    'PIEZAS PEUGEOT', 'PIEZA FIAT', 'PIEZA NISSAN', 'PIEZA RENAULT', 'NUMERO DE PIEZA'
+]
+
+INVALID_PIECES = [
+    'NAN', 'NONE', '-', '', 'NO APLICA', 'NOAPLICA', 'N/A', 'NA', 'OK', 'NOK', 'NO', 
+    'SI', 'SÍ', 'PENDIENTE', 'NO LLEVA', 'NO TIENE', 'NINGUNO', 'NINGUNA', 
+    '0', 'X', '.', ',', 'NO APLICABLE', 'VACIO', 'S/D'
+]
+
+meses_lista = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+
+def clean_text_standard(text):
+    if pd.isna(text): return ""
+    text = str(text).upper().strip()
+    return re.sub(r'\s+', ' ', text)
+
+def clean_matricero(name):
+    name = clean_text_standard(name)
+    match = re.match(r'^(\d+)\s*[-_]?\s*(.*)', name)
+    if match: return f"{match.group(1)} - {match.group(2).strip()}"
+    return name
+
+def get_col_idx(cols, candidates):
+    for cand in candidates:
+        for i, c in enumerate(cols):
+            if c.strip() == cand: return i
+    for cand in candidates:
+        for i, c in enumerate(cols):
+            if cand in c: return i
+    return None
+
+def parse_hours(raw_hs):
+    """ Función anti-errores para convertir textos extraños de horas a números limpios """
+    if pd.isna(raw_hs): return 0.0
+    s = str(raw_hs).lower().strip()
+    if not s or s in ['nan', 'none']: return 0.0
+    
+    # Si ingresaron la hora con formato reloj (Ej: 08:30)
+    if ':' in s:
+        try:
+            parts = s.split(':')
+            h = float(re.sub(r'[^\d.]', '', parts[0])) if re.sub(r'[^\d.]', '', parts[0]) else 0.0
+            m = float(re.sub(r'[^\d.]', '', parts[1])) if len(parts) > 1 and re.sub(r'[^\d.]', '', parts[1]) else 0.0
+            return h + (m / 60.0)
+        except:
+            return 0.0
+            
+    # Procesamiento normal
+    s = s.replace(',', '.')
+    s = re.sub(r'[^\d.]', '', s)
+    try:
+        if s:
+            if s.count('.') > 1:
+                s = s.replace('.', '', s.count('.') - 1)
+            val = float(s)
+            # Si alguien escribió 800 en vez de 8.00 (muy común en planillas)
+            if val >= 100: 
+                val = val / 100
+            return val
+    except:
+        pass
+    return 0.0
+
+# ==========================================
+# 3. MOTOR DE EXTRACCIÓN 
+# ==========================================
+@st.cache_data(ttl=300)
+def load_data():
+    cal_data, mant_data, act_data = [], [], []
+    
+    for config in SHEETS_CONFIG:
+        try:
+            df = pd.read_csv(config["url"], skiprows=config["skiprows"])
+            
+            df.columns = df.columns.astype(str).str.upper().str.strip().str.replace(r'\s+', ' ', regex=True)
+            cols = pd.Series(df.columns)
+            for dup in cols[cols.duplicated()].unique():
+                cols[cols[cols == dup].index.values.tolist()] = [f"{dup}.{i}" if i != 0 else dup for i in range(sum(cols == dup))]
+            df.columns = cols
+            df_cols = df.columns.tolist()
+
+            idx_fecha = get_col_idx(df_cols, ['FECHA'])
+            idx_mat = get_col_idx(df_cols, ['MATRICERO'])
+            
+            if idx_fecha is None or idx_mat is None: continue
+
+            for _, row in df.iterrows():
+                fecha = str(row.iloc[idx_fecha]).strip()
+                mat_raw = str(row.iloc[idx_mat]).strip()
+                
+                if fecha in ['NAN', 'NONE', ''] or mat_raw in ['NAN', 'NONE', '']: continue
+                mat = clean_matricero(mat_raw)
+
+                if config['tipo'] in ['preventivo', 'correctivo']:
+                    idx_hs = next((i for i, c in enumerate(df_cols) if ('HS REALIZADAS' in c or 'HORAS REALIZADAS' in c) and 'TAREA' not in c), None)
+                    horas = parse_hours(row.iloc[idx_hs]) if idx_hs is not None else 0.0
+                    
+                    if horas <= 0: continue
+
+                    estado = 'NO'
+                    c_terms_idx = [i for i, c in enumerate(df_cols) if 'TERMINADO' in c or 'TERMINO' in c]
+                    for i_term in reversed(c_terms_idx):
+                        if pd.notna(row.iloc[i_term]):
+                            val_t = str(row.iloc[i_term]).upper().strip()
+                            if 'SI' in val_t or 'SÍ' in val_t: 
+                                estado = 'SI'
+                                break
+                            elif 'NO' in val_t:
+                                estado = 'NO'
+                                break
+
+                    piezas_found = []
+                    for i, col_name in enumerate(df_cols):
+                        base_col = col_name.split('.')[0].strip()
+                        if base_col in VALID_PIEZA_COLS:
+                            val_pieza = clean_text_standard(row.iloc[i])
+                            if val_pieza and val_pieza not in INVALID_PIECES:
+                                op_val = '-'
+                                for j in range(i+1, min(i+4, len(df_cols))):
+                                    if 'OPERACION' in df_cols[j] or 'OPERACIÓN' in df_cols[j]:
+                                        o_v = clean_text_standard(row.iloc[j])
+                                        if o_v not in ['NAN', 'NONE', '']: op_val = o_v
+                                        break
+                                piezas_found.append({'matriz': val_pieza, 'op': op_val})
+
+                    if piezas_found:
+                        hs_per_piece = horas / len(piezas_found)
+                        for p in piezas_found:
+                            mant_data.append({
+                                'FECHA': fecha, 'MATRICERO': mat, 'MATRIZ': p['matriz'], 
+                                'OPERACION': p['op'], 'TIPO': config['tipo'].upper(),
+                                'HORAS': hs_per_piece, 'TERMINADO': estado, 'EMPRESA': config['empresa']
+                            })
+                        cal_data.append({'FECHA': fecha, 'MATRICERO': mat, 'TOTAL_HORAS': horas, 'EMPRESA': config['empresa']})
+
+                elif config['tipo'] == 'asistencia':
+                    horas_asist_totales = 0.0
+                    for i in range(1, 5):
+                        idx_tarea = next((idx for idx, c in enumerate(df_cols) if (f'{i} - TAREA' in c or f'TAREA {i}' in c) and 'HS' not in c and 'OBS' not in c and 'DESEA' not in c), None)
+                        idx_hs_tarea = next((idx for idx, c in enumerate(df_cols) if f'TAREA {i}' in c and ('HS' in c or 'HORAS' in c)), None)
+
+                        if idx_tarea is not None and idx_hs_tarea is not None:
+                            t_val = clean_text_standard(row.iloc[idx_tarea])
+                            if t_val and t_val not in ['NAN', 'NONE', '-']:
+                                h_val = parse_hours(row.iloc[idx_hs_tarea])
+                                if h_val > 0:
+                                    act_data.append({'FECHA': fecha, 'MATRICERO': mat, 'TAREA': t_val, 'HORAS': h_val, 'EMPRESA': config['empresa']})
+                                    horas_asist_totales += h_val
+
+                    if horas_asist_totales > 0:
+                        cal_data.append({'FECHA': fecha, 'MATRICERO': mat, 'TOTAL_HORAS': horas_asist_totales, 'EMPRESA': config['empresa']})
+        except Exception as e:
+            pass
+            
+    df_calendario = pd.DataFrame(cal_data)
+    if not df_calendario.empty:
+        df_calendario['FECHA'] = pd.to_datetime(df_calendario['FECHA'], errors='coerce', dayfirst=True)
+        df_calendario = df_calendario.dropna(subset=['FECHA'])
+        df_calendario = df_calendario.groupby(['FECHA', 'MATRICERO', 'EMPRESA'], as_index=False)['TOTAL_HORAS'].sum()
+
+    df_mantenimiento = pd.DataFrame(mant_data)
+    if not df_mantenimiento.empty:
+        df_mantenimiento['FECHA'] = pd.to_datetime(df_mantenimiento['FECHA'], errors='coerce', dayfirst=True)
+        df_mantenimiento = df_mantenimiento.dropna(subset=['FECHA'])
+
+    df_actividades = pd.DataFrame(act_data)
+    if not df_actividades.empty:
+        df_actividades['FECHA'] = pd.to_datetime(df_actividades['FECHA'], errors='coerce', dayfirst=True)
+        df_actividades = df_actividades.dropna(subset=['FECHA'])
+
+    return df_calendario, df_mantenimiento, df_actividades
+
+with st.spinner("Conectando y descargando bases de datos..."):
+    df_raw, df_mant_raw, df_act_raw = load_data()
+
+
+# ==========================================
+# 4. CLASE PDF (FPDF) COMÚN Y FUNCIONES
+# ==========================================
+class PDF(FPDF):
+    def __init__(self, start_date, end_date, empresa=None, title_override=None):
+        super().__init__(orientation='L', unit='mm', format='A4')
+        if start_date == end_date:
+            self.rango = f"{start_date.strftime('%d/%m/%Y')}"
+        else:
+            self.rango = f"{start_date.strftime('%d/%m/%Y')} al {end_date.strftime('%d/%m/%Y')}"
+        
+        self.empresa = empresa
+        self.title_override = title_override
+        self.set_auto_page_break(auto=True, margin=15)
+        
+    def header(self):
+        self.set_font("Arial", 'B', 16)
+        self.set_text_color(31, 41, 55)
+        title = self.title_override if self.title_override else "Reporte Gerencial - Area de Matriceria"
+        if self.empresa:
+            title += f" ({self.empresa})"
+            
+        self.cell(0, 8, title, border=0, ln=True, align='C')
+        self.set_font("Arial", 'I', 10)
+        self.set_text_color(100, 100, 100)
+        self.cell(0, 6, f"Periodo: {self.rango}", border=0, ln=True, align='C')
+        self.ln(3)
+
+    def footer(self):
+        self.set_y(-15)
+        self.set_font("Arial", "I", 8)
+        self.set_text_color(128, 128, 128)
+        self.cell(0, 10, f"Pagina {self.page_no()}", 0, 0, "C")
+
+def clean_text(text):
+    return str(text).encode('latin-1', 'replace').decode('latin-1')
+
+
+# ==========================================
+# 5. GENERADORES DE PDF
+# ==========================================
+
+# --- DASHBOARD EJECUTIVO (MENSUAL) ---
+def draw_dashboard_table(pdf, x_start, y_start, title, df_data, col1_name, col2_name, total_hs):
+    pdf.set_xy(x_start, y_start)
+    pdf.set_font("Arial", 'B', 8)
+    pdf.set_fill_color(31, 73, 125)
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(90, 6, title, border=1, align='C', fill=True)
+    
+    pdf.set_xy(x_start, y_start + 6)
+    pdf.set_fill_color(220, 220, 220)
+    pdf.set_text_color(0, 0, 0)
+    pdf.cell(60, 5, col1_name, border=1, fill=True)
+    pdf.cell(15, 5, col2_name, border=1, align='C', fill=True)
+    pdf.cell(15, 5, "%", border=1, align='C', fill=True)
+    
+    y = y_start + 11
+    pdf.set_font("Arial", '', 7)
+    
+    if df_data.empty:
+        pdf.set_xy(x_start, y)
+        pdf.cell(90, 5, "Sin registros en el periodo", border=1, align='C')
+        return
+
+    for _, row in df_data.iterrows():
+        pdf.set_xy(x_start, y)
+        val_name = clean_text(str(row.iloc[0])[:35])
+        val_hs = row.iloc[1]
+        pct = (val_hs / total_hs * 100) if total_hs > 0 else 0
+        
+        pdf.cell(60, 5, val_name, border=1)
+        pdf.cell(15, 5, f"{val_hs:.1f}", border=1, align='C')
+        pdf.cell(15, 5, f"{pct:.1f}%", border=1, align='C')
+        y += 5
+
+def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, empresa=None):
+    if empresa:
+        df_mant = df_mant_orig[df_mant_orig['EMPRESA'] == empresa].copy() if not df_mant_orig.empty else pd.DataFrame()
+        df_act = df_act_orig[df_act_orig['EMPRESA'] == empresa].copy() if not df_act_orig.empty else pd.DataFrame()
+    else:
+        df_mant, df_act = df_mant_orig.copy(), df_act_orig.copy()
+
+    df_mant_anual = df_mant[df_mant['FECHA'].dt.year == s_date.year] if not df_mant.empty else pd.DataFrame()
+    df_act_anual = df_act[df_act['FECHA'].dt.year == s_date.year] if not df_act.empty else pd.DataFrame()
+
+    df_mant_mes = df_mant_anual[(df_mant_anual['FECHA'].dt.date >= s_date) & (df_mant_anual['FECHA'].dt.date <= e_date)] if not df_mant_anual.empty else pd.DataFrame()
+    df_act_mes = df_act_anual[(df_act_anual['FECHA'].dt.date >= s_date) & (df_act_anual['FECHA'].dt.date <= e_date)] if not df_act_anual.empty else pd.DataFrame()
+
+    pdf = PDF(s_date, e_date, empresa, title_override=f"RESUMEN EJECUTIVO - {mes_nombre.upper()} {s_date.year}")
+    pdf.add_page()
+    
+    # 1. Calcular Totales (Del Mes)
+    hs_prev = df_mant_mes[df_mant_mes['TIPO'] == 'PREVENTIVO']['HORAS'].sum() if not df_mant_mes.empty else 0
+    hs_corr = df_mant_mes[df_mant_mes['TIPO'] == 'CORRECTIVO']['HORAS'].sum() if not df_mant_mes.empty else 0
+    hs_asis = df_act_mes['HORAS'].sum() if not df_act_mes.empty else 0
+    hs_total = hs_prev + hs_corr + hs_asis
+
+    # 2. Dibujar Cajas Originales Separadas (Como pidió el usuario)
+    y_metrics = 25
+    x_positions = [10, 80, 150, 220]
+    titles = ["MANT. PREVENTIVO", "MANT. CORRECTIVO", "HS DE ASISTENCIA", "TOTAL DE HORAS"]
+    values = [hs_prev, hs_corr, hs_asis, hs_total]
+    
+    for x, tit, val in zip(x_positions, titles, values):
+        pct = (val / hs_total * 100) if hs_total > 0 else 0
+        pdf.set_xy(x, y_metrics)
+        pdf.set_font("Arial", 'B', 9)
+        pdf.set_fill_color(31, 73, 125)
+        pdf.set_text_color(255, 255, 255)
+        pdf.cell(65, 6, tit, border=1, align='C', fill=True)
+        
+        pdf.set_xy(x, y_metrics + 6)
+        pdf.set_fill_color(240, 240, 240)
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(32.5, 8, f"{val:.1f}", border=1, align='C', fill=True)
+        pdf.cell(32.5, 8, f"{pct:.1f}%", border=1, align='C', fill=True)
+
+    y_charts = 45
+    
+    # 3. Gráfico Evolutivo Anual
+    meses_full = {1:'ENERO', 2:'FEBRERO', 3:'MARZO', 4:'ABRIL', 5:'MAYO', 6:'JUNIO', 
+                  7:'JULIO', 8:'AGOSTO', 9:'SEPTIEMBRE', 10:'OCTUBRE', 11:'NOVIEMBRE', 12:'DICIEMBRE'}
+    
+    all_months_df = pd.DataFrame([{'MES_NUM': k, 'MES': v, 'TIPO': t, 'HORAS': 0.0} 
+                                  for k, v in meses_full.items() 
+                                  for t in ['PREVENTIVO', 'CORRECTIVO', 'ASISTENCIA']])
+                                  
+    df_trend = pd.DataFrame()
+    if not df_mant_anual.empty or not df_act_anual.empty:
+        parts = []
+        if not df_mant_anual.empty: parts.append(df_mant_anual[['FECHA', 'TIPO', 'HORAS']])
+        if not df_act_anual.empty: parts.append(df_act_anual[['FECHA', 'HORAS']].assign(TIPO='ASISTENCIA'))
+        df_trend = pd.concat(parts)
+    
+    if not df_trend.empty:
+        df_trend['MES_NUM'] = df_trend['FECHA'].dt.month
+        df_trend['MES'] = df_trend['MES_NUM'].map(meses_full)
+        trend_grp = df_trend.groupby(['MES_NUM', 'MES', 'TIPO'])['HORAS'].sum().reset_index()
+        # Forzar que todos los meses aparezcan en el dataframe
+        trend_grp = pd.concat([all_months_df, trend_grp]).groupby(['MES_NUM', 'MES', 'TIPO'])['HORAS'].sum().reset_index()
+    else:
+        trend_grp = all_months_df
+        
+    trend_grp['LABEL'] = trend_grp['HORAS'].apply(lambda x: (f"{x:.0f}" if x.is_integer() else f"{x:.1f}") if x > 0 else "")
+
+    fig_trend = px.bar(trend_grp, x='MES', y='HORAS', color='TIPO', barmode='group', text='LABEL',
+                       color_discrete_map={'PREVENTIVO':'#2ca02c', 'CORRECTIVO':'#d62728', 'ASISTENCIA':'#1f77b4'})
+    
+    fig_trend.update_traces(textposition='outside', textfont_size=10)
+    fig_trend.update_xaxes(categoryorder='array', categoryarray=list(meses_full.values()), title="")
+    fig_trend.update_yaxes(title="HS DE MATRICERIA")
+    fig_trend.update_layout(
+        title=f"Evolución Mensual ({s_date.year})", 
+        margin=dict(t=30, b=40, l=10, r=10), 
+        height=280, width=580, 
+        legend=dict(
+            orientation="h", 
+            yanchor="top", 
+            y=-0.1, 
+            xanchor="center", 
+            x=0.5,
+            title="" 
+        )
+    )
+
+    # 4. Gráfico Circular (Torta)
     fig_pie = go.Figure(data=[go.Pie(labels=['PREVENTIVO', 'CORRECTIVO', 'ASISTENCIA'], 
                                      values=[hs_prev, hs_corr, hs_asis], 
                                      marker_colors=['#2ca02c', '#d62728', '#1f77b4'], hole=0.4)])
@@ -721,6 +1095,10 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
 # ==========================================
 # 7. INTERFAZ PRINCIPAL: CAJAS DE DESCARGA
 # ==========================================
+
+st.write("---")
+st.markdown("<h4 style='text-align: center;'>Generar Reportes en PDF</h4>", unsafe_allow_html=True)
+st.write("") 
 
 # --- CAJA 1: RESUMEN EJECUTIVO (Solo Mensual) ---
 st.markdown('<div class="section-box">', unsafe_allow_html=True)
