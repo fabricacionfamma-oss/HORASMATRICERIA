@@ -82,7 +82,6 @@ def load_data():
         try:
             df = pd.read_csv(config["url"], skiprows=config["skiprows"])
             
-            # Limpieza básica
             df.columns = df.columns.astype(str).str.upper().str.strip().str.replace(r'\s+', ' ', regex=True)
             cols = pd.Series(df.columns)
             for dup in cols[cols.duplicated()].unique():
@@ -90,7 +89,6 @@ def load_data():
             df.columns = cols
             df_cols = df.columns.tolist()
 
-            # Búsqueda EXACTA por índice de columna para no confundir Fechas con Legajos
             idx_fecha = get_col_idx(df_cols, ['FECHA'])
             idx_mat = get_col_idx(df_cols, ['MATRICERO'])
             
@@ -106,9 +104,7 @@ def load_data():
                 
                 mat = clean_matricero(mat_raw)
 
-                # ====================================================
                 # PREVENTIVO / CORRECTIVO
-                # ====================================================
                 if config['tipo'] in ['preventivo', 'correctivo']:
                     idx_hs = next((i for i, c in enumerate(df_cols) if ('HS REALIZADAS' in c or 'HORAS REALIZADAS' in c) and 'TAREA' not in c), None)
                     horas = 0.0
@@ -138,11 +134,8 @@ def load_data():
                     piezas_found = []
                     for i, col_name in enumerate(df_cols):
                         base_col = col_name.split('.')[0].strip()
-                        
                         if base_col in VALID_PIEZA_COLS:
                             val_pieza = clean_text_standard(row.iloc[i])
-                            
-                            # Filtro Anti-Basura activado
                             if val_pieza and val_pieza not in INVALID_PIECES:
                                 op_val = '-'
                                 for j in range(i+1, min(i+4, len(df_cols))):
@@ -151,10 +144,7 @@ def load_data():
                                         if o_v not in ['NAN', 'NONE', '']: op_val = o_v
                                         break
                                 
-                                piezas_found.append({
-                                    'matriz': val_pieza, 
-                                    'op': op_val
-                                })
+                                piezas_found.append({'matriz': val_pieza, 'op': op_val})
 
                     if piezas_found:
                         hs_per_piece = horas / len(piezas_found)
@@ -166,9 +156,7 @@ def load_data():
                             })
                         cal_data.append({'FECHA': fecha, 'MATRICERO': mat, 'TOTAL_HORAS': horas, 'EMPRESA': config['empresa']})
 
-                # ====================================================
                 # ASISTENCIA
-                # ====================================================
                 elif config['tipo'] == 'asistencia':
                     horas_asist_totales = 0.0
                     for i in range(1, 5):
@@ -281,8 +269,12 @@ def build_pdf(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date, empresa=
     meses_es = ["", "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
     dias_espanol = ["LUNES", "MARTES", "MIÉRCOLES", "JUEVES", "VIERNES", "SÁBADO", "DOMINGO"]
     
+    # -------------------------------------------------------------
+    # CÁLCULO ESTRICTO DE FECHAS SELECCIONADAS
+    # -------------------------------------------------------------
     delta = e_date - s_date
     all_dates = [s_date + timedelta(days=i) for i in range(delta.days + 1)]
+    
     months_dict = defaultdict(list)
     for d in all_dates: months_dict[(d.year, d.month)].append(d)
 
@@ -308,14 +300,12 @@ def build_pdf(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date, empresa=
     pdf.cell(0, 8, f"RESUMEN GENERAL DE ASISTENCIA: {s_date.strftime('%d/%m/%Y')} al {e_date.strftime('%d/%m/%Y')}", ln=True, align='L')
     pdf.ln(2)
 
-    # Calculamos los días hábiles sobre TODO el intervalo de tiempo seleccionado
     working_days = sum(1 for d in all_dates if d.weekday() < 5)
     estimated_hs = working_days * 8
     
-    # --- COMENTARIO DE CÁLCULO DE HORAS ---
     pdf.set_font("Arial", 'I', 8)
     pdf.set_text_color(100, 100, 100)
-    pdf.cell(0, 5, "Calculo de horas estimadas: Dias de la semana * 8 hs por turno", ln=True, align='L')
+    pdf.cell(0, 5, f"Calculo exacto al intervalo indicado: Se detectaron {working_days} dias habiles x 8 hs = {estimated_hs} hs estimadas por persona.", ln=True, align='L')
     pdf.ln(2)
 
     pdf.set_font("Arial", 'B', 9)
@@ -337,7 +327,6 @@ def build_pdf(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date, empresa=
     pdf.set_font("Arial", 'B', 9)
     for mat in all_matriceros:
         df_mat = df_period[df_period['MATRICERO'] == mat]
-        # Sumamos todo lo del periodo
         reported = df_mat['TOTAL_HORAS'].sum()
         diff = reported - estimated_hs
 
@@ -464,7 +453,10 @@ def build_pdf(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date, empresa=
     pdf.cell(0, 5, "Muestra horas invertidas y estado final.", ln=True)
     pdf.ln(3)
 
-    def draw_mant_table(df_sub, title):
+    def draw_mant_table(df_sub, title, force_new_page=False):
+        if force_new_page:
+            pdf.add_page() # <-- FUERZA UN SALTO DE PÁGINA CUANDO SE REQUIERE
+        
         pdf.set_font("Arial", 'B', 12)
         pdf.set_text_color(31, 73, 125)
         pdf.cell(0, 8, f"MANTENIMIENTO {title}", ln=True, align='L')
@@ -540,8 +532,10 @@ def build_pdf(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date, empresa=
             df_prev = resumen_mant[resumen_mant['TIPO'] == 'PREVENTIVO'].sort_values('HS_ACUMULADAS', ascending=False)
             df_corr = resumen_mant[resumen_mant['TIPO'] == 'CORRECTIVO'].sort_values('HS_ACUMULADAS', ascending=False)
 
-            draw_mant_table(df_prev, "PREVENTIVO")
-            draw_mant_table(df_corr, "CORRECTIVO")
+            # Preventivo usa la página actual del Anexo 1
+            draw_mant_table(df_prev, "PREVENTIVO", force_new_page=False)
+            # Correctivo obliga una nueva página
+            draw_mant_table(df_corr, "CORRECTIVO", force_new_page=True)
         else:
             pdf.set_font("Arial", '', 10)
             pdf.set_text_color(0, 0, 0)
@@ -551,11 +545,10 @@ def build_pdf(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date, empresa=
         pdf.set_text_color(0, 0, 0)
         pdf.cell(0, 7, "No hubo mantenimiento en este periodo.", ln=True)
 
-    pdf.ln(5)
-
     # =========================================================
     # PARTE 3: ASISTENCIA 
     # =========================================================
+    pdf.add_page() # <-- SALTO DE PÁGINA PARA LA TABLA DE ASISTENCIA
     pdf.set_font("Arial", 'B', 14)
     pdf.set_text_color(31, 73, 125)
     pdf.cell(0, 8, "ANEXO 2: ACTIVIDADES DE ASISTENCIA", ln=True, align='L')
