@@ -732,62 +732,45 @@ with col_btn3:
 st.markdown('</div>', unsafe_allow_html=True)
 
 
-# --- CAJA 2: REPORTE DETALLADO (Diario/Semanal/Mensual) ---
+# --- CAJA 2: REPORTE DETALLADO (Rango Personalizado) ---
 st.markdown('<div class="section-box">', unsafe_allow_html=True)
 st.subheader("📅 2. Reporte Detallado (Calendarios y Anexos)")
-st.write("Genera el PDF completo con las horas calculadas, calendario de asistencias y anexos.")
+st.write("Genera el PDF completo con las horas calculadas, calendario de asistencias y anexos para un rango de fechas personalizado.")
 
-tipo_detallado = st.radio("Seleccione el alcance del reporte:", ["Diario", "Semanal", "Mensual"], horizontal=True)
+col_d_ini, col_d_fin = st.columns(2)
+with col_d_ini:
+    start_date_det = st.date_input("📅 Fecha de Inicio", datetime.now().date() - timedelta(days=7), key="start_det")
+with col_d_fin:
+    end_date_det = st.date_input("📅 Fecha de Fin", datetime.now().date(), key="end_det")
 
-if tipo_detallado == "Diario":
-    fecha_d = st.date_input("Seleccione el día:", datetime.now().date())
-    start_date_det = fecha_d
-    end_date_det = fecha_d
-    label_file = fecha_d.strftime("%d-%m-%Y")
-    
-elif tipo_detallado == "Semanal":
-    fecha_s = st.date_input("Seleccione un día que pertenezca a la semana buscada:", datetime.now().date())
-    start_date_det = fecha_s - timedelta(days=fecha_s.weekday())
-    end_date_det = start_date_det + timedelta(days=6)
-    label_file = f"Semana_{start_date_det.strftime('%d-%m-%Y')}"
-    st.info(f"Semana calculada: Lunes {start_date_det.strftime('%d/%m/%Y')} al Domingo {end_date_det.strftime('%d/%m/%Y')}")
-
+if start_date_det > end_date_det:
+    st.error("La fecha de inicio no puede ser mayor a la fecha de fin.")
 else:
-    col_dm1, col_dm2 = st.columns(2)
-    with col_dm1:
-        mes_det = st.selectbox("Mes", meses_lista, index=datetime.now().month - 1, key="mes_det")
-    with col_dm2:
-        anio_det = st.selectbox("Año", range(2023, 2030), index=datetime.now().year - 2023, key="anio_det")
+    label_file = f"{start_date_det.strftime('%d%m%Y')}_al_{end_date_det.strftime('%d%m%Y')}"
     
-    mes_num_det = meses_lista.index(mes_det) + 1
-    _, last_day_det = calendar.monthrange(anio_det, mes_num_det)
-    start_date_det = datetime(anio_det, mes_num_det, 1).date()
-    end_date_det = datetime(anio_det, mes_num_det, last_day_det).date()
-    label_file = f"{mes_det}_{anio_det}"
+    st.write("")
+    col_btn4, col_btn5, col_btn6 = st.columns(3)
+    with col_btn4:
+        if st.button("🖨️ Detallado Completo", type="primary", use_container_width=True):
+            with st.spinner("Generando reporte..."):
+                try:
+                    pdf_data = build_pdf_detailed(df_raw, df_mant_raw, df_act_raw, start_date_det, end_date_det, empresa=None)
+                    st.download_button("📥 Descargar", data=pdf_data, file_name=f"Reporte_Detallado_{label_file}.pdf", mime="application/pdf", use_container_width=True)
+                except Exception as e: st.error(f"Error: {e}")
 
-st.write("")
-col_btn4, col_btn5, col_btn6 = st.columns(3)
-with col_btn4:
-    if st.button("🖨️ Detallado Completo", type="primary", use_container_width=True):
-        with st.spinner("Generando reporte..."):
-            try:
-                pdf_data = build_pdf_detailed(df_raw, df_mant_raw, df_act_raw, start_date_det, end_date_det, empresa=None)
-                st.download_button("📥 Descargar", data=pdf_data, file_name=f"Reporte_Detallado_{label_file}.pdf", mime="application/pdf", use_container_width=True)
-            except Exception as e: st.error(f"Error: {e}")
+    with col_btn5:
+        if st.button("🏭 Detallado Fumiscor", type="secondary", use_container_width=True):
+            with st.spinner("Generando reporte..."):
+                try:
+                    pdf_data = build_pdf_detailed(df_raw, df_mant_raw, df_act_raw, start_date_det, end_date_det, empresa="FUMISCOR")
+                    st.download_button("📥 Descargar", data=pdf_data, file_name=f"Reporte_Detallado_Fumiscor_{label_file}.pdf", mime="application/pdf", use_container_width=True)
+                except Exception as e: st.error(f"Error: {e}")
 
-with col_btn5:
-    if st.button("🏭 Detallado Fumiscor", type="secondary", use_container_width=True):
-        with st.spinner("Generando reporte..."):
-            try:
-                pdf_data = build_pdf_detailed(df_raw, df_mant_raw, df_act_raw, start_date_det, end_date_det, empresa="FUMISCOR")
-                st.download_button("📥 Descargar", data=pdf_data, file_name=f"Reporte_Detallado_Fumiscor_{label_file}.pdf", mime="application/pdf", use_container_width=True)
-            except Exception as e: st.error(f"Error: {e}")
-
-with col_btn6:
-    if st.button("⚙️ Detallado Famma", type="secondary", use_container_width=True):
-        with st.spinner("Generando reporte..."):
-            try:
-                pdf_data = build_pdf_detailed(df_raw, df_mant_raw, df_act_raw, start_date_det, end_date_det, empresa="FAMMA")
-                st.download_button("📥 Descargar", data=pdf_data, file_name=f"Reporte_Detallado_Famma_{label_file}.pdf", mime="application/pdf", use_container_width=True)
-            except Exception as e: st.error(f"Error: {e}")
+    with col_btn6:
+        if st.button("⚙️ Detallado Famma", type="secondary", use_container_width=True):
+            with st.spinner("Generando reporte..."):
+                try:
+                    pdf_data = build_pdf_detailed(df_raw, df_mant_raw, df_act_raw, start_date_det, end_date_det, empresa="FAMMA")
+                    st.download_button("📥 Descargar", data=pdf_data, file_name=f"Reporte_Detallado_Famma_{label_file}.pdf", mime="application/pdf", use_container_width=True)
+                except Exception as e: st.error(f"Error: {e}")
 st.markdown('</div>', unsafe_allow_html=True)
