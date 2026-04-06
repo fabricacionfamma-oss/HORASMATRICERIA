@@ -30,13 +30,10 @@ st.divider()
 # 2. ENLACES Y CONSTANTES
 # ==========================================
 SHEETS_CONFIG = [
-    # ASISTENCIA
     {"url": "https://docs.google.com/spreadsheets/d/1sccnOPuosjMSepp0FZoEGteYArIIhB2fGH7TeSRW_7E/export?format=csv&gid=1128388185", "skiprows": 2, "tipo": "asistencia", "empresa": "FUMISCOR"}, 
     {"url": "https://docs.google.com/spreadsheets/d/1UNSCxrTy9TUdggNt0ta0TcsEvT3idaRGWcXE_t8J40I/export?format=csv&gid=979884533", "skiprows": 0, "tipo": "asistencia", "empresa": "FAMMA"}, 
-    # CORRECTIVOS
     {"url": "https://docs.google.com/spreadsheets/d/1bL_tnlSXGO_t9tKnhIHT5pZ3DAxivbiq2tFETVxBaVI/export?format=csv&gid=1507213893", "skiprows": 2, "tipo": "correctivo", "empresa": "FUMISCOR"}, 
     {"url": "https://docs.google.com/spreadsheets/d/1A-0mngZdgvZGbqzWjA_awhrwfvca0K4aGqp5NBAoFAY/export?format=csv&gid=238711679", "skiprows": 0, "tipo": "correctivo", "empresa": "FAMMA"}, 
-    # PREVENTIVOS
     {"url": "https://docs.google.com/spreadsheets/d/1VqsPNhAlT1kPCltbMWsbkZNFBKdwZRFM5RAmnRV0v3c/export?format=csv&gid=1603203990", "skiprows": 2, "tipo": "preventivo", "empresa": "FUMISCOR"}, 
     {"url": "https://docs.google.com/spreadsheets/d/1MptnOuRfyOAr1EgzNJVygTtNziOSdzXJn-PZDX0pNzc/export?format=csv&gid=324842888", "skiprows": 0, "tipo": "preventivo", "empresa": "FAMMA"} 
 ]
@@ -288,35 +285,73 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
     df_mant_mes = df_mant_anual[(df_mant_anual['FECHA'].dt.date >= s_date) & (df_mant_anual['FECHA'].dt.date <= e_date)] if not df_mant_anual.empty else pd.DataFrame()
     df_act_mes = df_act_anual[(df_act_anual['FECHA'].dt.date >= s_date) & (df_act_anual['FECHA'].dt.date <= e_date)] if not df_act_anual.empty else pd.DataFrame()
 
-    pdf = PDF(s_date, e_date, empresa, title_override=f"RESUMEN EJECUTIVO - {mes_nombre.upper()} {s_date.year}")
+    pdf = PDF(s_date, e_date, empresa, title_override=f"RESUMEN DE HORAS DE MATRICERIA - {mes_nombre.upper()} {s_date.year}")
     pdf.add_page()
     
+    # 1. Calcular Totales (Del Mes)
     hs_prev = df_mant_mes[df_mant_mes['TIPO'] == 'PREVENTIVO']['HORAS'].sum() if not df_mant_mes.empty else 0
     hs_corr = df_mant_mes[df_mant_mes['TIPO'] == 'CORRECTIVO']['HORAS'].sum() if not df_mant_mes.empty else 0
     hs_asis = df_act_mes['HORAS'].sum() if not df_act_mes.empty else 0
     hs_total = hs_prev + hs_corr + hs_asis
 
+    # 2. Dibujar Tabla Centralizada de Métricas (Igual a la imagen)
     y_metrics = 25
-    x_positions = [10, 80, 150, 220]
-    titles = ["MANT. PREVENTIVO", "MANT. CORRECTIVO", "HS DE ASISTENCIA", "TOTAL DE HORAS"]
-    values = [hs_prev, hs_corr, hs_asis, hs_total]
-    
-    for x, tit, val in zip(x_positions, titles, values):
-        pct = (val / hs_total * 100) if hs_total > 0 else 0
-        pdf.set_xy(x, y_metrics)
-        pdf.set_font("Arial", 'B', 9)
-        pdf.set_fill_color(31, 73, 125)
-        pdf.set_text_color(255, 255, 255)
-        pdf.cell(65, 6, tit, border=1, align='C', fill=True)
-        
-        pdf.set_xy(x, y_metrics + 6)
-        pdf.set_fill_color(240, 240, 240)
-        pdf.set_text_color(0, 0, 0)
-        pdf.set_font("Arial", 'B', 12)
-        pdf.cell(32.5, 8, f"{val:.1f}", border=1, align='C', fill=True)
-        pdf.cell(32.5, 8, f"{pct:.1f}%", border=1, align='C', fill=True)
+    widths = [45, 45, 45, 30, 30, 30]
+    x_start = (297 - sum(widths)) / 2  # Centrar tabla
 
-    y_charts = 45
+    # Fila 1 y 2 de encabezados (Diseño unificado)
+    pdf.set_xy(x_start, y_metrics)
+    pdf.set_font("Arial", 'B', 8)
+    pdf.set_fill_color(245, 245, 245) # Gris clarito
+    pdf.set_text_color(0, 0, 0)
+    
+    pdf.cell(widths[0], 5, "HS DE MANTENIMIENTO", border='LTR', align='C', fill=True)
+    pdf.cell(widths[1], 5, "HS DE MANTENIMIENTO", border='LTR', align='C', fill=True)
+    pdf.cell(widths[2], 10, "HS DE ASISTENCIA", border=1, align='C', fill=True)
+    pdf.cell(widths[3], 10, "TOTAL DE HS", border=1, align='C', fill=True)
+    pdf.cell(widths[4], 10, "Hs Extra", border=1, align='C', fill=True)
+    pdf.cell(widths[5], 10, "HS PROYECTO", border=1, align='C', fill=True)
+
+    pdf.set_xy(x_start, y_metrics + 5)
+    pdf.cell(widths[0], 5, "PREVENTIVO", border='LBR', align='C', fill=True)
+    pdf.cell(widths[1], 5, "CORRECTIVO", border='LBR', align='C', fill=True)
+
+    # Fila de Valores
+    pdf.set_xy(x_start, y_metrics + 10)
+    pdf.set_font("Arial", 'B', 14)
+    vals = [
+        f"{hs_prev:.0f}" if hs_prev.is_integer() else f"{hs_prev:.1f}",
+        f"{hs_corr:.0f}" if hs_corr.is_integer() else f"{hs_corr:.1f}",
+        f"{hs_asis:.0f}" if hs_asis.is_integer() else f"{hs_asis:.1f}",
+        f"{hs_total:.0f}" if hs_total.is_integer() else f"{hs_total:.1f}",
+        "-",
+        "-"
+    ]
+    for w, v in zip(widths, vals):
+        pdf.cell(w, 8, v, border='LTR', align='C')
+
+    # Fila de Porcentajes con Colores
+    pdf.set_xy(x_start, y_metrics + 18)
+    pdf.set_font("Arial", 'B', 10)
+    pcts = [
+        f"{(hs_prev/hs_total*100):.0f}%" if hs_total > 0 else "0%",
+        f"{(hs_corr/hs_total*100):.0f}%" if hs_total > 0 else "0%",
+        f"{(hs_asis/hs_total*100):.0f}%" if hs_total > 0 else "0%",
+        "100%" if hs_total > 0 else "0%",
+        "-",
+        "-"
+    ]
+    # Verde, Rojo, Azul, Negro, Gris, Gris
+    colors = [(44, 160, 44), (214, 39, 40), (31, 119, 180), (0, 0, 0), (100, 100, 100), (100, 100, 100)]
+    
+    for w, p, c in zip(widths, pcts, colors):
+        pdf.set_text_color(*c)
+        pdf.cell(w, 6, p, border='LBR', align='C')
+        
+    pdf.set_text_color(0, 0, 0)
+    y_charts = y_metrics + 28
+
+    # 3. Dibujar Gráficos
     df_trend = pd.DataFrame()
     if not df_mant_anual.empty or not df_act_anual.empty:
         parts = []
@@ -330,26 +365,25 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
         df_trend['MES'] = df_trend['MES_NUM'].map(meses_full)
         trend_grp = df_trend.groupby(['MES_NUM', 'MES', 'TIPO'])['HORAS'].sum().reset_index()
         
-        # Etiqueta de datos sin decimales si es entero
         trend_grp['LABEL'] = trend_grp['HORAS'].apply(lambda x: f"{x:.0f}" if x.is_integer() else f"{x:.1f}")
 
         fig_trend = px.bar(trend_grp, x='MES', y='HORAS', color='TIPO', barmode='group', text='LABEL',
                            color_discrete_map={'PREVENTIVO':'#2ca02c', 'CORRECTIVO':'#d62728', 'ASISTENCIA':'#1f77b4'})
         
-        fig_trend.update_traces(textposition='outside', textfont_size=8)
+        fig_trend.update_traces(textposition='outside', textfont_size=10)
         fig_trend.update_xaxes(categoryorder='array', categoryarray=list(meses_full.values()), title="")
         fig_trend.update_yaxes(title="HS DE MATRICERIA")
         fig_trend.update_layout(
             title=f"Evolución Mensual ({s_date.year})", 
             margin=dict(t=30, b=40, l=10, r=10), 
-            height=280, width=550, 
+            height=280, width=580, 
             legend=dict(
                 orientation="h", 
                 yanchor="top", 
-                y=-0.15, 
+                y=-0.1, 
                 xanchor="center", 
                 x=0.5,
-                title="" # Leyenda sin titulo
+                title="" # Ocultamos el título de la leyenda para que quede más limpio
             )
         )
     else:
@@ -363,7 +397,7 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
         title=f"Distribución ({mes_nombre.title()})", 
         margin=dict(t=30, b=40, l=10, r=10), 
         height=280, width=350,
-        legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
+        legend=dict(orientation="h", yanchor="top", y=-0.1, xanchor="center", x=0.5)
     )
     
     with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_trend, \
@@ -371,7 +405,7 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
         fig_trend.write_image(tmp_trend.name, engine="kaleido")
         fig_pie.write_image(tmp_pie.name, engine="kaleido")
         
-        pdf.image(tmp_trend.name, x=10, y=y_charts, w=160)
+        pdf.image(tmp_trend.name, x=5, y=y_charts, w=170)
         pdf.image(tmp_pie.name, x=180, y=y_charts, w=100)
         
         os.remove(tmp_trend.name)
