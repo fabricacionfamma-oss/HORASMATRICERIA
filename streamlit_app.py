@@ -304,17 +304,19 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
     pdf = PDF(s_date, e_date, empresa, title_override=f"RESUMEN EJECUTIVO - {mes_nombre.upper()} {s_date.year}")
     pdf.add_page()
     
+    # 1. Calcular Totales (Del Mes)
     hs_prev = df_mant_mes[df_mant_mes['TIPO'] == 'PREVENTIVO']['HORAS'].sum() if not df_mant_mes.empty else 0
     hs_corr = df_mant_mes[df_mant_mes['TIPO'] == 'CORRECTIVO']['HORAS'].sum() if not df_mant_mes.empty else 0
     hs_asis = df_act_mes['HORAS'].sum() if not df_act_mes.empty else 0
     hs_total = hs_prev + hs_corr + hs_asis
 
+    # 2. Dibujar Tabla Centralizada de Métricas (Solo 4 columnas)
     y_metrics = 25
-    widths = [45, 45, 45, 30, 30, 30]
+    widths = [50, 50, 50, 50]
     x_start = (297 - sum(widths)) / 2 
 
     pdf.set_xy(x_start, y_metrics)
-    pdf.set_font("Arial", 'B', 8)
+    pdf.set_font("Arial", 'B', 9)
     pdf.set_fill_color(245, 245, 245) 
     pdf.set_text_color(0, 0, 0)
     
@@ -322,8 +324,6 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
     pdf.cell(widths[1], 5, "HS DE MANTENIMIENTO", border='LTR', align='C', fill=True)
     pdf.cell(widths[2], 10, "HS DE ASISTENCIA", border=1, align='C', fill=True)
     pdf.cell(widths[3], 10, "TOTAL DE HS", border=1, align='C', fill=True)
-    pdf.cell(widths[4], 10, "Hs Extra", border=1, align='C', fill=True)
-    pdf.cell(widths[5], 10, "HS PROYECTO", border=1, align='C', fill=True)
 
     pdf.set_xy(x_start, y_metrics + 5)
     pdf.cell(widths[0], 5, "PREVENTIVO", border='LBR', align='C', fill=True)
@@ -335,24 +335,20 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
         f"{hs_prev:.0f}" if hs_prev.is_integer() else f"{hs_prev:.1f}",
         f"{hs_corr:.0f}" if hs_corr.is_integer() else f"{hs_corr:.1f}",
         f"{hs_asis:.0f}" if hs_asis.is_integer() else f"{hs_asis:.1f}",
-        f"{hs_total:.0f}" if hs_total.is_integer() else f"{hs_total:.1f}",
-        "-",
-        "-"
+        f"{hs_total:.0f}" if hs_total.is_integer() else f"{hs_total:.1f}"
     ]
     for w, v in zip(widths, vals):
         pdf.cell(w, 8, v, border='LTR', align='C')
 
     pdf.set_xy(x_start, y_metrics + 18)
-    pdf.set_font("Arial", 'B', 10)
+    pdf.set_font("Arial", 'B', 11)
     pcts = [
         f"{(hs_prev/hs_total*100):.0f}%" if hs_total > 0 else "0%",
         f"{(hs_corr/hs_total*100):.0f}%" if hs_total > 0 else "0%",
         f"{(hs_asis/hs_total*100):.0f}%" if hs_total > 0 else "0%",
-        "100%" if hs_total > 0 else "0%",
-        "-",
-        "-"
+        "100%" if hs_total > 0 else "0%"
     ]
-    colors = [(44, 160, 44), (214, 39, 40), (31, 119, 180), (0, 0, 0), (100, 100, 100), (100, 100, 100)]
+    colors = [(44, 160, 44), (214, 39, 40), (31, 119, 180), (0, 0, 0)]
     
     for w, p, c in zip(widths, pcts, colors):
         pdf.set_text_color(*c)
@@ -361,6 +357,7 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
     pdf.set_text_color(0, 0, 0)
     y_charts = y_metrics + 28
 
+    # 3. Dibujar Gráficos
     df_trend = pd.DataFrame()
     if not df_mant_anual.empty or not df_act_anual.empty:
         parts = []
@@ -384,19 +381,18 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
         fig_trend = px.bar(trend_grp, x='MES', y='HORAS', color='TIPO', barmode='group', text='LABEL',
                            color_discrete_map={'PREVENTIVO':'#2ca02c', 'CORRECTIVO':'#d62728', 'ASISTENCIA':'#1f77b4'})
         
-        # Ajustes anti-superposición
         fig_trend.update_traces(
             textposition='outside', 
-            textfont_size=8,        # Tamaño de fuente reducido
-            textangle=-90,          # Texto en vertical para evitar solapamiento
-            cliponaxis=False        # Previene recortes en el tope
+            textfont_size=8, 
+            textangle=-90, 
+            cliponaxis=False
         )
         fig_trend.update_xaxes(categoryorder='array', categoryarray=list(meses_full.values()), title="")
         fig_trend.update_yaxes(title="HS DE MATRICERIA")
         fig_trend.update_layout(
             title=f"Evolución Mensual ({s_date.year})", 
             margin=dict(t=30, b=40, l=10, r=10), 
-            height=280, width=580, 
+            height=300, width=800, 
             legend=dict(
                 orientation="h", 
                 yanchor="top", 
@@ -408,7 +404,7 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
         )
     else:
         fig_trend = go.Figure()
-        fig_trend.update_layout(title=f"Sin datos para la Evolución Anual {s_date.year}", height=280, width=550)
+        fig_trend.update_layout(title=f"Sin datos para la Evolución Anual {s_date.year}", height=300, width=800)
 
     fig_pie = go.Figure(data=[go.Pie(labels=['PREVENTIVO', 'CORRECTIVO', 'ASISTENCIA'], 
                                      values=[hs_prev, hs_corr, hs_asis], 
@@ -416,7 +412,7 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
     fig_pie.update_layout(
         title=f"Distribución ({mes_nombre.title()})", 
         margin=dict(t=30, b=40, l=10, r=10), 
-        height=280, width=350,
+        height=300, width=350,
         legend=dict(orientation="h", yanchor="top", y=-0.1, xanchor="center", x=0.5)
     )
     
@@ -425,12 +421,13 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
         fig_trend.write_image(tmp_trend.name, engine="kaleido")
         fig_pie.write_image(tmp_pie.name, engine="kaleido")
         
-        pdf.image(tmp_trend.name, x=5, y=y_charts, w=170)
-        pdf.image(tmp_pie.name, x=180, y=y_charts, w=100)
+        pdf.image(tmp_trend.name, x=5, y=y_charts, w=190)
+        pdf.image(tmp_pie.name, x=195, y=y_charts, w=95)
         
         os.remove(tmp_trend.name)
         os.remove(tmp_pie.name)
 
+    # 4. Tablas Top 20 (Hoja 2)
     pdf.add_page()
     pdf.set_font("Arial", 'B', 14)
     pdf.set_text_color(31, 73, 125)
@@ -458,6 +455,50 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
     draw_dashboard_table(pdf, 10, y_tables, "TOP 20 MATRICES - PREVENTIVO", top_p, "MAQUINA", "HS", hs_prev)
     draw_dashboard_table(pdf, 105, y_tables, "TOP 20 MATRICES - CORRECTIVO", top_c, "MAQUINA", "HS", hs_corr)
     draw_dashboard_table(pdf, 200, y_tables, "HS ASISTENCIA POR MATRICERO", top_a, "MATRICERO", "HS", hs_asis)
+
+    # 5. Hoja 3 - Asistencia por Tarea/Actividad
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 14)
+    pdf.set_text_color(31, 73, 125)
+    pdf.cell(0, 10, f"DETALLE DE ASISTENCIA POR ACTIVIDAD - {mes_nombre.upper()}", ln=True, align='C')
+    pdf.ln(5)
+
+    if not df_act_mes.empty:
+        top_act = df_act_mes.groupby('TAREA')['HORAS'].sum().reset_index().sort_values('HORAS', ascending=False)
+        x_start_act = (297 - 240) / 2
+        
+        pdf.set_font("Arial", 'B', 10)
+        pdf.set_fill_color(31, 73, 125)
+        pdf.set_text_color(255, 255, 255)
+        
+        pdf.set_x(x_start_act)
+        pdf.cell(180, 8, "ACTIVIDAD / TAREA", border=1, fill=True)
+        pdf.cell(30, 8, "HS TOTALES", border=1, align='C', fill=True)
+        pdf.cell(30, 8, "%", border=1, align='C', ln=True, fill=True)
+
+        pdf.set_font("Arial", '', 9)
+        pdf.set_text_color(0, 0, 0)
+
+        for _, row in top_act.iterrows():
+            pdf.set_x(x_start_act)
+            val_name = clean_text(str(row['TAREA'])[:95])
+            val_hs = row['HORAS']
+            pct = (val_hs / hs_asis * 100) if hs_asis > 0 else 0
+            
+            pdf.cell(180, 7, val_name, border=1)
+            pdf.cell(30, 7, f"{val_hs:.1f}", border=1, align='C')
+            pdf.cell(30, 7, f"{pct:.1f}%", border=1, align='C', ln=True)
+
+        pdf.set_font("Arial", 'B', 10)
+        pdf.set_fill_color(220, 220, 220)
+        pdf.set_x(x_start_act)
+        pdf.cell(180, 8, "TOTAL HORAS ASISTENCIA", border=1, align='R', fill=True)
+        pdf.cell(30, 8, f"{hs_asis:.1f}", border=1, align='C', fill=True)
+        pdf.cell(30, 8, "100.0%", border=1, align='C', ln=True, fill=True)
+    else:
+        pdf.set_font("Arial", '', 11)
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(0, 10, "Sin registros de asistencia en el periodo", ln=True, align='C')
 
     temp_pdf = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     pdf.output(temp_pdf.name)
