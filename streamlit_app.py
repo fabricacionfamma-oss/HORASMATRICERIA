@@ -325,15 +325,33 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
         df_trend = pd.concat(parts)
     
     if not df_trend.empty:
-        meses_abbr = {1:'Ene', 2:'Feb', 3:'Mar', 4:'Abr', 5:'May', 6:'Jun', 7:'Jul', 8:'Ago', 9:'Sep', 10:'Oct', 11:'Nov', 12:'Dic'}
+        meses_full = {1:'ENERO', 2:'FEBRERO', 3:'MARZO', 4:'ABRIL', 5:'MAYO', 6:'JUNIO', 7:'JULIO', 8:'AGOSTO', 9:'SEPTIEMBRE', 10:'OCTUBRE', 11:'NOVIEMBRE', 12:'DICIEMBRE'}
         df_trend['MES_NUM'] = df_trend['FECHA'].dt.month
-        df_trend['MES'] = df_trend['MES_NUM'].map(meses_abbr)
+        df_trend['MES'] = df_trend['MES_NUM'].map(meses_full)
         trend_grp = df_trend.groupby(['MES_NUM', 'MES', 'TIPO'])['HORAS'].sum().reset_index()
         
-        fig_trend = px.bar(trend_grp, x='MES', y='HORAS', color='TIPO', barmode='group',
+        # Etiqueta de datos sin decimales si es entero
+        trend_grp['LABEL'] = trend_grp['HORAS'].apply(lambda x: f"{x:.0f}" if x.is_integer() else f"{x:.1f}")
+
+        fig_trend = px.bar(trend_grp, x='MES', y='HORAS', color='TIPO', barmode='group', text='LABEL',
                            color_discrete_map={'PREVENTIVO':'#2ca02c', 'CORRECTIVO':'#d62728', 'ASISTENCIA':'#1f77b4'})
-        fig_trend.update_xaxes(categoryorder='array', categoryarray=list(meses_abbr.values()))
-        fig_trend.update_layout(title=f"Evolución Mensual ({s_date.year})", margin=dict(t=30, b=20, l=10, r=10), height=280, width=550, legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01))
+        
+        fig_trend.update_traces(textposition='outside', textfont_size=8)
+        fig_trend.update_xaxes(categoryorder='array', categoryarray=list(meses_full.values()), title="")
+        fig_trend.update_yaxes(title="HS DE MATRICERIA")
+        fig_trend.update_layout(
+            title=f"Evolución Mensual ({s_date.year})", 
+            margin=dict(t=30, b=40, l=10, r=10), 
+            height=280, width=550, 
+            legend=dict(
+                orientation="h", 
+                yanchor="top", 
+                y=-0.15, 
+                xanchor="center", 
+                x=0.5,
+                title="" # Leyenda sin titulo
+            )
+        )
     else:
         fig_trend = go.Figure()
         fig_trend.update_layout(title=f"Sin datos para la Evolución Anual {s_date.year}", height=280, width=550)
@@ -341,7 +359,12 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
     fig_pie = go.Figure(data=[go.Pie(labels=['PREVENTIVO', 'CORRECTIVO', 'ASISTENCIA'], 
                                      values=[hs_prev, hs_corr, hs_asis], 
                                      marker_colors=['#2ca02c', '#d62728', '#1f77b4'], hole=0.4)])
-    fig_pie.update_layout(title=f"Distribución Total ({mes_nombre.title()})", margin=dict(t=30, b=20, l=10, r=10), height=280, width=350)
+    fig_pie.update_layout(
+        title=f"Distribución ({mes_nombre.title()})", 
+        margin=dict(t=30, b=40, l=10, r=10), 
+        height=280, width=350,
+        legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
+    )
     
     with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_trend, \
          tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_pie:
