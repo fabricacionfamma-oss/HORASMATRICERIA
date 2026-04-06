@@ -18,11 +18,12 @@ st.set_page_config(page_title="Reporte Matricería", layout="centered", page_ico
 st.markdown("""
 <style>
     .header-style { font-size: 26px; font-weight: bold; margin-bottom: 5px; color: #1F2937; text-align: center; }
+    .section-box { padding: 20px; border-radius: 10px; border: 1px solid #e5e7eb; margin-bottom: 25px; background-color: #f9fafb; }
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="header-style">📅 Reporte Gerencial de Matricería</div>', unsafe_allow_html=True)
-st.write("<p style='text-align: center;'>Cálculo de horas de matricería y resumen ejecutivo mensual.</p>", unsafe_allow_html=True)
+st.write("<p style='text-align: center;'>Cálculo de horas de matricería y resumen ejecutivo.</p>", unsafe_allow_html=True)
 st.divider()
 
 # ==========================================
@@ -50,6 +51,8 @@ INVALID_PIECES = [
     'SI', 'SÍ', 'PENDIENTE', 'NO LLEVA', 'NO TIENE', 'NINGUNO', 'NINGUNA', 
     '0', 'X', '.', ',', 'NO APLICABLE', 'VACIO', 'S/D'
 ]
+
+meses_lista = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
 def clean_text_standard(text):
     if pd.isna(text): return ""
@@ -92,16 +95,13 @@ def load_data():
             idx_fecha = get_col_idx(df_cols, ['FECHA'])
             idx_mat = get_col_idx(df_cols, ['MATRICERO'])
             
-            if idx_fecha is None or idx_mat is None: 
-                continue
+            if idx_fecha is None or idx_mat is None: continue
 
             for _, row in df.iterrows():
                 fecha = str(row.iloc[idx_fecha]).strip()
                 mat_raw = str(row.iloc[idx_mat]).strip()
                 
-                if fecha in ['NAN', 'NONE', ''] or mat_raw in ['NAN', 'NONE', '']: 
-                    continue
-                
+                if fecha in ['NAN', 'NONE', ''] or mat_raw in ['NAN', 'NONE', '']: continue
                 mat = clean_matricero(mat_raw)
 
                 if config['tipo'] in ['preventivo', 'correctivo']:
@@ -115,7 +115,6 @@ def load_data():
                                 val = float(raw_hs)
                                 if val > 0: horas = val
                         except: pass
-                    
                     if horas <= 0: continue
 
                     estado = 'NO'
@@ -142,7 +141,6 @@ def load_data():
                                         o_v = clean_text_standard(row.iloc[j])
                                         if o_v not in ['NAN', 'NONE', '']: op_val = o_v
                                         break
-                                
                                 piezas_found.append({'matriz': val_pieza, 'op': op_val})
 
                     if piezas_found:
@@ -163,7 +161,6 @@ def load_data():
 
                         if idx_tarea is not None and idx_hs_tarea is not None:
                             t_val = clean_text_standard(row.iloc[idx_tarea])
-                            
                             if t_val and t_val not in ['NAN', 'NONE', '-']:
                                 raw_hs = str(row.iloc[idx_hs_tarea]).lower().replace(',', '.')
                                 raw_hs = re.sub(r'[^\d.]', '', raw_hs)
@@ -177,9 +174,7 @@ def load_data():
 
                     if horas_asist_totales > 0:
                         cal_data.append({'FECHA': fecha, 'MATRICERO': mat, 'TOTAL_HORAS': horas_asist_totales, 'EMPRESA': config['empresa']})
-
         except Exception as e:
-            print(f"Error procesando {config['url']}: {e}")
             pass
             
     df_calendario = pd.DataFrame(cal_data)
@@ -200,36 +195,21 @@ def load_data():
 
     return df_calendario, df_mantenimiento, df_actividades
 
-df_raw, df_mant_raw, df_act_raw = load_data()
-
-# ==========================================
-# 4. INTERFAZ: SELECCIÓN DE MES Y AÑO
-# ==========================================
-col1, col2 = st.columns(2)
-today = datetime.now()
-
-meses_lista = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
-
-with col1:
-    mes_seleccionado = st.selectbox("📅 Mes a Reportar", meses_lista, index=today.month - 1)
-with col2:
-    anio_seleccionado = st.selectbox("📅 Año", range(2023, 2030), index=today.year - 2023)
-
-# Calculamos automáticamente el rango de fechas del mes seleccionado
-mes_num = meses_lista.index(mes_seleccionado) + 1
-_, last_day = calendar.monthrange(anio_seleccionado, mes_num)
-
-start_date = datetime(anio_seleccionado, mes_num, 1).date()
-end_date = datetime(anio_seleccionado, mes_num, last_day).date()
+with st.spinner("Conectando y descargando bases de datos..."):
+    df_raw, df_mant_raw, df_act_raw = load_data()
 
 
 # ==========================================
-# 5. CLASE PDF (FPDF) COMÚN Y FUNCIONES DE TEXTO
+# 4. CLASE PDF (FPDF) COMÚN Y FUNCIONES
 # ==========================================
 class PDF(FPDF):
     def __init__(self, start_date, end_date, empresa=None, title_override=None):
         super().__init__(orientation='L', unit='mm', format='A4')
-        self.rango = f"{start_date.strftime('%d/%m/%Y')} al {end_date.strftime('%d/%m/%Y')}"
+        if start_date == end_date:
+            self.rango = f"{start_date.strftime('%d/%m/%Y')}"
+        else:
+            self.rango = f"{start_date.strftime('%d/%m/%Y')} al {end_date.strftime('%d/%m/%Y')}"
+        
         self.empresa = empresa
         self.title_override = title_override
         self.set_auto_page_break(auto=True, margin=15)
@@ -258,8 +238,10 @@ def clean_text(text):
 
 
 # ==========================================
-# 6. GENERADOR DE PDF: RESUMEN EJECUTIVO (DASHBOARD)
+# 5. GENERADORES DE PDF
 # ==========================================
+
+# --- DASHBOARD EJECUTIVO (MENSUAL) ---
 def draw_dashboard_table(pdf, x_start, y_start, title, df_data, col1_name, col2_name, total_hs):
     pdf.set_xy(x_start, y_start)
     pdf.set_font("Arial", 'B', 8)
@@ -294,31 +276,26 @@ def draw_dashboard_table(pdf, x_start, y_start, title, df_data, col1_name, col2_
         y += 5
 
 def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, empresa=None):
-    # Filtrado por empresa
     if empresa:
         df_mant = df_mant_orig[df_mant_orig['EMPRESA'] == empresa].copy() if not df_mant_orig.empty else pd.DataFrame()
         df_act = df_act_orig[df_act_orig['EMPRESA'] == empresa].copy() if not df_act_orig.empty else pd.DataFrame()
     else:
         df_mant, df_act = df_mant_orig.copy(), df_act_orig.copy()
 
-    # Extraemos TODO el año para el gráfico de barras evolutivo
     df_mant_anual = df_mant[df_mant['FECHA'].dt.year == s_date.year] if not df_mant.empty else pd.DataFrame()
     df_act_anual = df_act[df_act['FECHA'].dt.year == s_date.year] if not df_act.empty else pd.DataFrame()
 
-    # Extraemos SOLO EL MES para los KPIs y el resto del dashboard
     df_mant_mes = df_mant_anual[(df_mant_anual['FECHA'].dt.date >= s_date) & (df_mant_anual['FECHA'].dt.date <= e_date)] if not df_mant_anual.empty else pd.DataFrame()
     df_act_mes = df_act_anual[(df_act_anual['FECHA'].dt.date >= s_date) & (df_act_anual['FECHA'].dt.date <= e_date)] if not df_act_anual.empty else pd.DataFrame()
 
-    pdf = PDF(s_date, e_date, empresa, title_override=f"RESUMEN DE HORAS DE MATRICERIA - {mes_nombre.upper()} {s_date.year}")
+    pdf = PDF(s_date, e_date, empresa, title_override=f"RESUMEN EJECUTIVO - {mes_nombre.upper()} {s_date.year}")
     pdf.add_page()
     
-    # 1. Calcular Totales (Del Mes)
     hs_prev = df_mant_mes[df_mant_mes['TIPO'] == 'PREVENTIVO']['HORAS'].sum() if not df_mant_mes.empty else 0
     hs_corr = df_mant_mes[df_mant_mes['TIPO'] == 'CORRECTIVO']['HORAS'].sum() if not df_mant_mes.empty else 0
     hs_asis = df_act_mes['HORAS'].sum() if not df_act_mes.empty else 0
     hs_total = hs_prev + hs_corr + hs_asis
 
-    # 2. Dibujar Cajas de Métricas Superiores (Del Mes)
     y_metrics = 25
     x_positions = [10, 80, 150, 220]
     titles = ["MANT. PREVENTIVO", "MANT. CORRECTIVO", "HS DE ASISTENCIA", "TOTAL DE HORAS"]
@@ -339,10 +316,7 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
         pdf.cell(32.5, 8, f"{val:.1f}", border=1, align='C', fill=True)
         pdf.cell(32.5, 8, f"{pct:.1f}%", border=1, align='C', fill=True)
 
-    # 3. Dibujar Gráficos
     y_charts = 45
-    
-    # GRÁFICO 1: EVOLUCIÓN ANUAL (Barras - Utiliza todo el año)
     df_trend = pd.DataFrame()
     if not df_mant_anual.empty or not df_act_anual.empty:
         parts = []
@@ -364,7 +338,6 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
         fig_trend = go.Figure()
         fig_trend.update_layout(title=f"Sin datos para la Evolución Anual {s_date.year}", height=280, width=550)
 
-    # GRÁFICO 2: DISTRIBUCIÓN DEL MES (Torta - Utiliza solo el mes seleccionado)
     fig_pie = go.Figure(data=[go.Pie(labels=['PREVENTIVO', 'CORRECTIVO', 'ASISTENCIA'], 
                                      values=[hs_prev, hs_corr, hs_asis], 
                                      marker_colors=['#2ca02c', '#d62728', '#1f77b4'], hole=0.4)])
@@ -381,7 +354,6 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
         os.remove(tmp_trend.name)
         os.remove(tmp_pie.name)
 
-    # 4. Tablas Top 20 (Hoja 2 - Utilizan solo el mes seleccionado)
     pdf.add_page()
     pdf.set_font("Arial", 'B', 14)
     pdf.set_text_color(31, 73, 125)
@@ -389,7 +361,6 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
     pdf.ln(2)
 
     top_p, top_c, top_a = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-    
     if not df_mant_mes.empty:
         df_p = df_mant_mes[df_mant_mes['TIPO'] == 'PREVENTIVO']
         if not df_p.empty:
@@ -418,10 +389,7 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
     os.remove(temp_pdf.name)
     return pdf_bytes
 
-
-# ==========================================
-# 7. GENERADOR DE PDF: REPORTE DETALLADO (Calendarios y Anexos)
-# ==========================================
+# --- REPORTE DETALLADO (CALENDARIO) ---
 def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date, empresa=None):
     if empresa:
         df_datos = df_datos_orig[df_datos_orig['EMPRESA'] == empresa].copy() if not df_datos_orig.empty else df_datos_orig
@@ -449,14 +417,13 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
     if not all_matriceros:
         pdf.add_page()
         pdf.set_font("Arial", '', 12)
-        pdf.cell(0, 10, "No hay horas cargadas para el mes y empresa seleccionados.", ln=True, align='C')
+        pdf.cell(0, 10, "No hay horas cargadas para el rango seleccionado.", ln=True, align='C')
         return pdf.output(dest='S').encode('latin-1')
 
-    # --- TABLA DE HORAS ESTIMADAS ---
     pdf.add_page()
     pdf.set_font("Arial", 'B', 14)
     pdf.set_text_color(31, 73, 125)
-    pdf.cell(0, 8, f"RESUMEN GENERAL DE ASISTENCIA: {s_date.strftime('%d/%m/%Y')} al {e_date.strftime('%d/%m/%Y')}", ln=True, align='L')
+    pdf.cell(0, 8, f"RESUMEN DE ASISTENCIA: {s_date.strftime('%d/%m/%Y')} al {e_date.strftime('%d/%m/%Y')}", ln=True, align='L')
     pdf.ln(2)
 
     working_days = sum(1 for d in all_dates if d.weekday() < 5)
@@ -464,13 +431,13 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
     
     pdf.set_font("Arial", 'I', 8)
     pdf.set_text_color(100, 100, 100)
-    pdf.cell(0, 5, f"Calculo exacto al mes seleccionado: Se detectaron {working_days} dias habiles x 8 hs = {estimated_hs} hs estimadas por persona.", ln=True, align='L')
+    pdf.cell(0, 5, f"Cálculo exacto: Se detectaron {working_days} días hábiles x 8 hs = {estimated_hs} hs estimadas.", ln=True, align='L')
     pdf.ln(2)
 
     pdf.set_font("Arial", 'B', 9)
     pdf.set_fill_color(0, 0, 0)
     pdf.set_text_color(255, 255, 255)
-    pdf.cell(196, 6, "TABLA GENERAL DE HORAS POR MATRICERO", border=1, ln=True, align='C', fill=True)
+    pdf.cell(196, 6, "TABLA GENERAL DE HORAS", border=1, ln=True, align='C', fill=True)
 
     pdf.set_fill_color(31, 73, 125)
     pdf.cell(70, 6, "MATRICERO", border=1, align='C', fill=True)
@@ -480,7 +447,6 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
     pdf.cell(46, 6, "FALTANTE / DIFERENCIA", border=1, align='C', ln=True, fill=True)
 
     total_estimado = total_cargadas = total_diferencia = 0
-
     pdf.set_font("Arial", 'B', 9)
     for mat in all_matriceros:
         df_mat = df_period[df_period['MATRICERO'] == mat]
@@ -494,7 +460,6 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
         pdf.set_fill_color(240, 240, 240)
         pdf.set_text_color(0, 0, 0)
         pdf.cell(70, 6, clean_text(mat[:35]), border=1, fill=True)
-        
         pdf.set_fill_color(255, 255, 255)
         pdf.cell(40, 6, str(estimated_hs), border=1, align='C', fill=True)
         t_rep = str(int(reported)) if reported == int(reported) else f"{reported:.1f}"
@@ -508,7 +473,6 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
         t_diff = f"{sign}{int(diff)}" if diff == int(diff) else f"{sign}{diff:.1f}"
         pdf.cell(46, 6, t_diff, border=1, align='C', ln=True, fill=True)
 
-    # TOTAL GENERAL
     pdf.set_font("Arial", 'B', 9)
     pdf.set_fill_color(220, 220, 220)
     pdf.set_text_color(0, 0, 0)
@@ -520,17 +484,15 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
     if total_diferencia < 0: pdf.set_text_color(192, 0, 0) 
     elif total_diferencia > 0: pdf.set_text_color(0, 128, 0)
     else: pdf.set_text_color(0, 0, 0)
-    
     sign_tot = "+" if total_diferencia > 0 else ""
     t_diff_tot = f"{sign_tot}{int(total_diferencia)}" if total_diferencia == int(total_diferencia) else f"{sign_tot}{total_diferencia:.1f}"
     pdf.cell(46, 7, t_diff_tot, border=1, align='C', ln=True, fill=True)
 
-    # --- CALENDARIOS SEMANALES ---
     for (year, month), dates_in_month in months_dict.items():
         pdf.add_page()
         pdf.set_font("Arial", 'B', 14)
         pdf.set_text_color(31, 73, 125)
-        pdf.cell(0, 8, f"CALENDARIO SEMANAL: {meses_es[month]} {year}", ln=True, align='L')
+        pdf.cell(0, 8, f"CALENDARIO: {meses_es[month]} {year}", ln=True, align='L')
         pdf.ln(2)
 
         weeks_dict = {}
@@ -561,7 +523,6 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
             x_s = pdf.get_x()
             pdf.cell(w_mat, 10, "MATRICERO", border=1, align='C', fill=True)
             x_d = pdf.get_x()
-            
             for d in full_week: pdf.cell(w_day, 5, clean_text(dias_espanol[d.weekday()]), border='LTR', align='C', fill=True)
             pdf.ln()
             pdf.set_x(x_d) 
@@ -578,24 +539,18 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
                 for d in full_week:
                     val = df_mat[df_mat['FECHA'].dt.date == d]['TOTAL_HORAS'].sum()
                     if val == 0:
-                        pdf.set_fill_color(127, 127, 127) 
-                        pdf.set_text_color(255, 255, 255)
+                        pdf.set_fill_color(127, 127, 127); pdf.set_text_color(255, 255, 255)
                     elif val == 8:
-                        pdf.set_fill_color(198, 239, 206) 
-                        pdf.set_text_color(0, 97, 0)
+                        pdf.set_fill_color(198, 239, 206); pdf.set_text_color(0, 97, 0)
                     elif val > 8:
-                        pdf.set_fill_color(255, 199, 206) 
-                        pdf.set_text_color(156, 0, 6)
+                        pdf.set_fill_color(255, 199, 206); pdf.set_text_color(156, 0, 6)
                     else:
-                        pdf.set_fill_color(255, 235, 156) 
-                        pdf.set_text_color(156, 101, 0)
-
+                        pdf.set_fill_color(255, 235, 156); pdf.set_text_color(156, 101, 0)
                     t_val = str(int(val)) if val == int(val) else f"{val:.1f}"
                     pdf.cell(w_day, 8, t_val, border=1, align='C', fill=True)
                 pdf.ln()
             pdf.ln(5)
 
-    # --- ANEXOS MANTENIMIENTO Y ASISTENCIA ---
     def draw_mant_table(df_sub, title, force_new_page=False):
         if force_new_page: pdf.add_page()
         pdf.set_font("Arial", 'B', 12)
@@ -603,10 +558,8 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
         pdf.cell(0, 8, f"MANTENIMIENTO {title}", ln=True, align='L')
         
         if df_sub.empty:
-            pdf.set_font("Arial", '', 10)
-            pdf.set_text_color(0, 0, 0)
-            pdf.cell(0, 7, f"No se registraron mantenimientos {title.lower()}s en este periodo.", ln=True)
-            pdf.ln(5)
+            pdf.set_font("Arial", '', 10); pdf.set_text_color(0, 0, 0)
+            pdf.cell(0, 7, f"No se registraron mantenimientos {title.lower()}s en este periodo.", ln=True); pdf.ln(5)
             return
 
         pdf.set_font("Arial", 'B', 9)
@@ -622,25 +575,19 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
         for _, row in df_sub.iterrows():
             total_hs += row['HS_ACUMULADAS']
             estado = str(row['ULTIMO_ESTADO']).upper()
-            pdf.set_fill_color(255, 255, 255)
-            pdf.set_text_color(0, 0, 0)
+            pdf.set_fill_color(255, 255, 255); pdf.set_text_color(0, 0, 0)
             pdf.cell(115, 7, clean_text(str(row['MATRIZ'])[:60]), border=1)
             pdf.cell(40, 7, clean_text(str(row['OPERACION'])[:22]), border=1, align='C')
-            
             hs_txt = str(int(row['HS_ACUMULADAS'])) if row['HS_ACUMULADAS'] == int(row['HS_ACUMULADAS']) else f"{row['HS_ACUMULADAS']:.1f}"
             pdf.cell(30, 7, hs_txt, border=1, align='C')
-            
             if "SI" in estado or "SÍ" in estado:
-                pdf.set_text_color(0, 128, 0)
-                estado_print = "TERMINADO"
+                pdf.set_text_color(0, 128, 0); estado_print = "TERMINADO"
             else:
-                pdf.set_text_color(192, 0, 0)
-                estado_print = "PENDIENTE"
+                pdf.set_text_color(192, 0, 0); estado_print = "PENDIENTE"
             pdf.cell(40, 7, clean_text(estado_print), border=1, align='C', ln=True)
 
         pdf.set_font("Arial", 'B', 9)
-        pdf.set_fill_color(220, 220, 220)
-        pdf.set_text_color(0, 0, 0)
+        pdf.set_fill_color(220, 220, 220); pdf.set_text_color(0, 0, 0)
         pdf.cell(155, 7, f"TOTAL HORAS {title}", border=1, align='R', fill=True)
         t_hs_txt = str(int(total_hs)) if total_hs == int(total_hs) else f"{total_hs:.1f}"
         pdf.cell(30, 7, t_hs_txt, border=1, align='C', fill=True)
@@ -656,7 +603,6 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
     if not df_mant.empty:
         mask_m = (df_mant['FECHA'].dt.date >= s_date) & (df_mant['FECHA'].dt.date <= e_date)
         df_m_period = df_mant.loc[mask_m].copy()
-        
         if not df_m_period.empty:
             df_m_period['MATRIZ'] = df_m_period['MATRIZ'].astype(str).str.upper().str.strip()
             df_m_period['OPERACION'] = df_m_period['OPERACION'].astype(str).str.upper().str.strip()
@@ -679,7 +625,6 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
     if not df_act.empty:
         mask_a = (df_act['FECHA'].dt.date >= s_date) & (df_act['FECHA'].dt.date <= e_date)
         df_a_period = df_act.loc[mask_a].copy()
-        
         if not df_a_period.empty:
             df_a_period['TAREA'] = df_a_period['TAREA'].astype(str).str.upper().str.strip()
             resumen_act = df_a_period.groupby('TAREA')['HORAS'].sum().reset_index().sort_values('HORAS', ascending=False)
@@ -705,7 +650,6 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
             pdf.cell(165, 7, "TOTAL HORAS ASISTENCIA", border=1, align='R', fill=True)
             t_hs_act_txt = str(int(total_hs_act)) if total_hs_act == int(total_hs_act) else f"{total_hs_act:.1f}"
             pdf.cell(30, 7, t_hs_act_txt, border=1, align='C', ln=True, fill=True)
-
         else:
             pdf.set_font("Arial", '', 10); pdf.set_text_color(0, 0, 0); pdf.cell(0, 7, "No se registraron tareas de asistencia en este periodo.", ln=True)
 
@@ -718,63 +662,109 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
 
 
 # ==========================================
-# 8. BOTONES DE DESCARGA (FILTROS DE EMPRESA)
+# 7. INTERFAZ PRINCIPAL: CAJAS DE DESCARGA
 # ==========================================
-st.write("---")
-st.markdown("<h4 style='text-align: center;'>Generar Reportes en PDF</h4>", unsafe_allow_html=True)
-st.write("") 
 
-st.subheader("📊 Opción 1: Resumen Ejecutivo (Dashboard y Top 20)")
-col_d1, col_d2, col_d3 = st.columns(3)
+# --- CAJA 1: RESUMEN EJECUTIVO (Solo Mensual) ---
+st.markdown('<div class="section-box">', unsafe_allow_html=True)
+st.subheader("📊 1. Resumen Ejecutivo (Dashboard Mensual)")
+st.write("Genera un PDF con el resumen anual, KPIs y las tablas del Top 20 del mes seleccionado.")
 
-with col_d1:
-    if st.button("📈 Dashboard Completo", type="primary", use_container_width=True):
-        with st.spinner("Generando dashboard unificado..."):
-            try:
-                pdf_data = build_pdf_dashboard(df_mant_raw, df_act_raw, start_date, end_date, mes_seleccionado, empresa=None)
-                st.download_button("📥 Descargar", data=pdf_data, file_name=f"Dashboard_Matriceria_{mes_seleccionado}_{anio_seleccionado}.pdf", mime="application/pdf", use_container_width=True)
-            except Exception as e: st.error(f"Error generando PDF: {e}")
+col_m1, col_m2 = st.columns(2)
+with col_m1:
+    mes_dash = st.selectbox("📅 Seleccione el Mes", meses_lista, index=datetime.now().month - 1, key="mes_dash")
+with col_m2:
+    anio_dash = st.selectbox("📅 Seleccione el Año", range(2023, 2030), index=datetime.now().year - 2023, key="anio_dash")
 
-with col_d2:
-    if st.button("📈 Dashboard Fumiscor", type="secondary", use_container_width=True):
-        with st.spinner("Generando dashboard Fumiscor..."):
-            try:
-                pdf_data = build_pdf_dashboard(df_mant_raw, df_act_raw, start_date, end_date, mes_seleccionado, empresa="FUMISCOR")
-                st.download_button("📥 Descargar", data=pdf_data, file_name=f"Dashboard_Fumiscor_{mes_seleccionado}_{anio_seleccionado}.pdf", mime="application/pdf", use_container_width=True)
-            except Exception as e: st.error(f"Error generando PDF: {e}")
+mes_num_dash = meses_lista.index(mes_dash) + 1
+_, last_day_dash = calendar.monthrange(anio_dash, mes_num_dash)
+start_date_dash = datetime(anio_dash, mes_num_dash, 1).date()
+end_date_dash = datetime(anio_dash, mes_num_dash, last_day_dash).date()
 
-with col_d3:
-    if st.button("📈 Dashboard Famma", type="secondary", use_container_width=True):
-        with st.spinner("Generando dashboard Famma..."):
-            try:
-                pdf_data = build_pdf_dashboard(df_mant_raw, df_act_raw, start_date, end_date, mes_seleccionado, empresa="FAMMA")
-                st.download_button("📥 Descargar", data=pdf_data, file_name=f"Dashboard_Famma_{mes_seleccionado}_{anio_seleccionado}.pdf", mime="application/pdf", use_container_width=True)
-            except Exception as e: st.error(f"Error generando PDF: {e}")
-
-st.write("---")
-st.subheader("📅 Opción 2: Reporte Detallado (Calendarios y Anexos)")
+st.write("")
 col_btn1, col_btn2, col_btn3 = st.columns(3)
-
 with col_btn1:
-    if st.button("🖨️ Detallado Completo", type="primary", use_container_width=True):
-        with st.spinner("Generando reporte unificado..."):
+    if st.button("📈 Dashboard Completo", type="primary", use_container_width=True):
+        with st.spinner("Generando dashboard..."):
             try:
-                pdf_data = build_pdf_detailed(df_raw, df_mant_raw, df_act_raw, start_date, end_date, empresa=None)
-                st.download_button("📥 Descargar", data=pdf_data, file_name=f"Reporte_Detallado_{mes_seleccionado}_{anio_seleccionado}.pdf", mime="application/pdf", use_container_width=True)
-            except Exception as e: st.error(f"Error generando PDF: {e}")
+                pdf_data = build_pdf_dashboard(df_mant_raw, df_act_raw, start_date_dash, end_date_dash, mes_dash, empresa=None)
+                st.download_button("📥 Descargar", data=pdf_data, file_name=f"Dashboard_Matriceria_{mes_dash}_{anio_dash}.pdf", mime="application/pdf", use_container_width=True)
+            except Exception as e: st.error(f"Error: {e}")
 
 with col_btn2:
-    if st.button("🏭 Detallado Fumiscor", type="secondary", use_container_width=True):
-        with st.spinner("Generando reporte Fumiscor..."):
+    if st.button("📈 Dashboard Fumiscor", type="secondary", use_container_width=True):
+        with st.spinner("Generando dashboard..."):
             try:
-                pdf_data = build_pdf_detailed(df_raw, df_mant_raw, df_act_raw, start_date, end_date, empresa="FUMISCOR")
-                st.download_button("📥 Descargar", data=pdf_data, file_name=f"Reporte_Detallado_Fumiscor_{mes_seleccionado}_{anio_seleccionado}.pdf", mime="application/pdf", use_container_width=True)
-            except Exception as e: st.error(f"Error generando PDF: {e}")
+                pdf_data = build_pdf_dashboard(df_mant_raw, df_act_raw, start_date_dash, end_date_dash, mes_dash, empresa="FUMISCOR")
+                st.download_button("📥 Descargar", data=pdf_data, file_name=f"Dashboard_Fumiscor_{mes_dash}_{anio_dash}.pdf", mime="application/pdf", use_container_width=True)
+            except Exception as e: st.error(f"Error: {e}")
 
 with col_btn3:
-    if st.button("⚙️ Detallado Famma", type="secondary", use_container_width=True):
-        with st.spinner("Generando reporte Famma..."):
+    if st.button("📈 Dashboard Famma", type="secondary", use_container_width=True):
+        with st.spinner("Generando dashboard..."):
             try:
-                pdf_data = build_pdf_detailed(df_raw, df_mant_raw, df_act_raw, start_date, end_date, empresa="FAMMA")
-                st.download_button("📥 Descargar", data=pdf_data, file_name=f"Reporte_Detallado_Famma_{mes_seleccionado}_{anio_seleccionado}.pdf", mime="application/pdf", use_container_width=True)
-            except Exception as e: st.error(f"Error generando PDF: {e}")
+                pdf_data = build_pdf_dashboard(df_mant_raw, df_act_raw, start_date_dash, end_date_dash, mes_dash, empresa="FAMMA")
+                st.download_button("📥 Descargar", data=pdf_data, file_name=f"Dashboard_Famma_{mes_dash}_{anio_dash}.pdf", mime="application/pdf", use_container_width=True)
+            except Exception as e: st.error(f"Error: {e}")
+st.markdown('</div>', unsafe_allow_html=True)
+
+
+# --- CAJA 2: REPORTE DETALLADO (Diario/Semanal/Mensual) ---
+st.markdown('<div class="section-box">', unsafe_allow_html=True)
+st.subheader("📅 2. Reporte Detallado (Calendarios y Anexos)")
+st.write("Genera el PDF completo con las horas calculadas, calendario de asistencias y anexos.")
+
+tipo_detallado = st.radio("Seleccione el alcance del reporte:", ["Diario", "Semanal", "Mensual"], horizontal=True)
+
+if tipo_detallado == "Diario":
+    fecha_d = st.date_input("Seleccione el día:", datetime.now().date())
+    start_date_det = fecha_d
+    end_date_det = fecha_d
+    label_file = fecha_d.strftime("%d-%m-%Y")
+    
+elif tipo_detallado == "Semanal":
+    fecha_s = st.date_input("Seleccione un día que pertenezca a la semana buscada:", datetime.now().date())
+    start_date_det = fecha_s - timedelta(days=fecha_s.weekday())
+    end_date_det = start_date_det + timedelta(days=6)
+    label_file = f"Semana_{start_date_det.strftime('%d-%m-%Y')}"
+    st.info(f"Semana calculada: Lunes {start_date_det.strftime('%d/%m/%Y')} al Domingo {end_date_det.strftime('%d/%m/%Y')}")
+
+else:
+    col_dm1, col_dm2 = st.columns(2)
+    with col_dm1:
+        mes_det = st.selectbox("Mes", meses_lista, index=datetime.now().month - 1, key="mes_det")
+    with col_dm2:
+        anio_det = st.selectbox("Año", range(2023, 2030), index=datetime.now().year - 2023, key="anio_det")
+    
+    mes_num_det = meses_lista.index(mes_det) + 1
+    _, last_day_det = calendar.monthrange(anio_det, mes_num_det)
+    start_date_det = datetime(anio_det, mes_num_det, 1).date()
+    end_date_det = datetime(anio_det, mes_num_det, last_day_det).date()
+    label_file = f"{mes_det}_{anio_det}"
+
+st.write("")
+col_btn4, col_btn5, col_btn6 = st.columns(3)
+with col_btn4:
+    if st.button("🖨️ Detallado Completo", type="primary", use_container_width=True):
+        with st.spinner("Generando reporte..."):
+            try:
+                pdf_data = build_pdf_detailed(df_raw, df_mant_raw, df_act_raw, start_date_det, end_date_det, empresa=None)
+                st.download_button("📥 Descargar", data=pdf_data, file_name=f"Reporte_Detallado_{label_file}.pdf", mime="application/pdf", use_container_width=True)
+            except Exception as e: st.error(f"Error: {e}")
+
+with col_btn5:
+    if st.button("🏭 Detallado Fumiscor", type="secondary", use_container_width=True):
+        with st.spinner("Generando reporte..."):
+            try:
+                pdf_data = build_pdf_detailed(df_raw, df_mant_raw, df_act_raw, start_date_det, end_date_det, empresa="FUMISCOR")
+                st.download_button("📥 Descargar", data=pdf_data, file_name=f"Reporte_Detallado_Fumiscor_{label_file}.pdf", mime="application/pdf", use_container_width=True)
+            except Exception as e: st.error(f"Error: {e}")
+
+with col_btn6:
+    if st.button("⚙️ Detallado Famma", type="secondary", use_container_width=True):
+        with st.spinner("Generando reporte..."):
+            try:
+                pdf_data = build_pdf_detailed(df_raw, df_mant_raw, df_act_raw, start_date_det, end_date_det, empresa="FAMMA")
+                st.download_button("📥 Descargar", data=pdf_data, file_name=f"Reporte_Detallado_Famma_{label_file}.pdf", mime="application/pdf", use_container_width=True)
+            except Exception as e: st.error(f"Error: {e}")
+st.markdown('</div>', unsafe_allow_html=True)
