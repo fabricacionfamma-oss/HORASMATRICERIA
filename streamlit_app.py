@@ -508,7 +508,7 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
     return pdf_bytes
 
 # --- REPORTE DETALLADO (CALENDARIO) ---
-def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date, empresa=None):
+def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date, empresa=None, dias_habiles_custom=None):
     if empresa:
         df_datos = df_datos_orig[df_datos_orig['EMPRESA'] == empresa].copy() if not df_datos_orig.empty else df_datos_orig
         df_mant = df_mant_orig[df_mant_orig['EMPRESA'] == empresa].copy() if not df_mant_orig.empty else df_mant_orig
@@ -544,12 +544,12 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
     pdf.cell(0, 8, f"RESUMEN DE ASISTENCIA: {s_date.strftime('%d/%m/%Y')} al {e_date.strftime('%d/%m/%Y')}", ln=True, align='L')
     pdf.ln(2)
 
-    working_days = sum(1 for d in all_dates if d.weekday() < 5)
+    working_days = dias_habiles_custom if dias_habiles_custom is not None else sum(1 for d in all_dates if d.weekday() < 5)
     estimated_hs = working_days * 8
     
     pdf.set_font("Arial", 'I', 8)
     pdf.set_text_color(100, 100, 100)
-    pdf.cell(0, 5, f"Cálculo exacto: Se detectaron {working_days} días hábiles x 8 hs = {estimated_hs} hs estimadas.", ln=True, align='L')
+    pdf.cell(0, 5, f"Cálculo: Se consideran {working_days} días hábiles (ajuste manual) x 8 hs = {estimated_hs} hs estimadas.", ln=True, align='L')
     pdf.ln(2)
 
     pdf.set_font("Arial", 'B', 9)
@@ -836,11 +836,15 @@ st.markdown('<div class="section-box">', unsafe_allow_html=True)
 st.subheader("📅 2. Reporte Detallado (Calendarios y Anexos)")
 st.write("Genera el PDF completo con las horas calculadas, calendario de asistencias y anexos para un rango de fechas personalizado.")
 
-col_d_ini, col_d_fin = st.columns(2)
+col_d_ini, col_d_fin, col_d_hab = st.columns(3)
 with col_d_ini:
     start_date_det = st.date_input("📅 Fecha de Inicio", datetime.now().date() - timedelta(days=7), key="start_det")
 with col_d_fin:
     end_date_det = st.date_input("📅 Fecha de Fin", datetime.now().date(), key="end_det")
+with col_d_hab:
+    # Calcula los días hábiles matemáticos para usar de valor sugerido
+    dias_defecto = sum(1 for i in range((end_date_det - start_date_det).days + 1) if (start_date_det + timedelta(days=i)).weekday() < 5) if end_date_det >= start_date_det else 0
+    dias_habiles_ui = st.number_input("🛠️ Días Hábiles (reales)", min_value=0, value=dias_defecto, step=1, help="Resta los feriados si los hubo")
 
 if start_date_det > end_date_det:
     st.error("La fecha de inicio no puede ser mayor a la fecha de fin.")
@@ -853,7 +857,7 @@ else:
         if st.button("🖨️ Detallado Completo", type="primary", use_container_width=True):
             with st.spinner("Generando reporte..."):
                 try:
-                    pdf_data = build_pdf_detailed(df_raw, df_mant_raw, df_act_raw, start_date_det, end_date_det, empresa=None)
+                    pdf_data = build_pdf_detailed(df_raw, df_mant_raw, df_act_raw, start_date_det, end_date_det, empresa=None, dias_habiles_custom=dias_habiles_ui)
                     st.download_button("📥 Descargar", data=pdf_data, file_name=f"Reporte_Detallado_{label_file}.pdf", mime="application/pdf", use_container_width=True)
                 except Exception as e: st.error(f"Error: {e}")
 
@@ -861,7 +865,7 @@ else:
         if st.button("🖨️ Detallado Fumiscor", type="secondary", use_container_width=True):
             with st.spinner("Generando reporte..."):
                 try:
-                    pdf_data = build_pdf_detailed(df_raw, df_mant_raw, df_act_raw, start_date_det, end_date_det, empresa="FUMISCOR")
+                    pdf_data = build_pdf_detailed(df_raw, df_mant_raw, df_act_raw, start_date_det, end_date_det, empresa="FUMISCOR", dias_habiles_custom=dias_habiles_ui)
                     st.download_button("📥 Descargar", data=pdf_data, file_name=f"Reporte_Detallado_Fumiscor_{label_file}.pdf", mime="application/pdf", use_container_width=True)
                 except Exception as e: st.error(f"Error: {e}")
 
@@ -869,7 +873,7 @@ else:
         if st.button("🖨️ Detallado Famma", type="secondary", use_container_width=True):
             with st.spinner("Generando reporte..."):
                 try:
-                    pdf_data = build_pdf_detailed(df_raw, df_mant_raw, df_act_raw, start_date_det, end_date_det, empresa="FAMMA")
+                    pdf_data = build_pdf_detailed(df_raw, df_mant_raw, df_act_raw, start_date_det, end_date_det, empresa="FAMMA", dias_habiles_custom=dias_habiles_ui)
                     st.download_button("📥 Descargar", data=pdf_data, file_name=f"Reporte_Detallado_Famma_{label_file}.pdf", mime="application/pdf", use_container_width=True)
                 except Exception as e: st.error(f"Error: {e}")
 st.markdown('</div>', unsafe_allow_html=True)
