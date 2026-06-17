@@ -296,7 +296,7 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
         df_mant, df_act = df_mant_orig.copy(), df_act_orig.copy()
 
     df_mant_anual = df_mant[df_mant['FECHA'].dt.year == s_date.year] if not df_mant.empty else pd.DataFrame()
-    df_act_anual = df_act[df_act['FECHA'].dt.year == s_date.year] if not df_act.empty else pd.DataFrame()
+    df_act_anual = df_act[df_act['FECHA'].dt.year == s_date.year] if not df_act_anual.empty else pd.DataFrame()
 
     df_mant_mes = df_mant_anual[(df_mant_anual['FECHA'].dt.date >= s_date) & (df_mant_anual['FECHA'].dt.date <= e_date)] if not df_mant_anual.empty else pd.DataFrame()
     df_act_mes = df_act_anual[(df_act_anual['FECHA'].dt.date >= s_date) & (df_act_anual['FECHA'].dt.date <= e_date)] if not df_act_anual.empty else pd.DataFrame()
@@ -779,6 +779,169 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
     return pdf_bytes
 
 
+# --- REPORTE INDIVIDUAL POR MATRICERO ---
+def build_pdf_matricero(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date, matricero, empresa=None):
+    if empresa:
+        df_m = df_mant_orig[(df_mant_orig['EMPRESA'] == empresa) & (df_mant_orig['MATRICERO'] == matricero)]
+        df_a = df_act_orig[(df_act_orig['EMPRESA'] == empresa) & (df_act_orig['MATRICERO'] == matricero)]
+        df_d = df_datos_orig[(df_datos_orig['EMPRESA'] == empresa) & (df_datos_orig['MATRICERO'] == matricero)]
+    else:
+        df_m = df_mant_orig[df_mant_orig['MATRICERO'] == matricero]
+        df_a = df_act_orig[df_act_orig['MATRICERO'] == matricero]
+        df_d = df_datos_orig[df_datos_orig['MATRICERO'] == matricero]
+
+    df_m = df_m[(df_m['FECHA'].dt.date >= s_date) & (df_m['FECHA'].dt.date <= e_date)].sort_values('FECHA')
+    df_a = df_a[(df_a['FECHA'].dt.date >= s_date) & (df_a['FECHA'].dt.date <= e_date)].sort_values('FECHA')
+    df_d = df_d[(df_d['FECHA'].dt.date >= s_date) & (df_d['FECHA'].dt.date <= e_date)]
+
+    pdf = PDF(s_date, e_date, empresa, title_override=f"Reporte Individual - {matricero}")
+    pdf.add_page()
+    
+    # 1. TABLA DE MANTENIMIENTO (PREV/CORR)
+    pdf.set_font("Arial", 'B', 12)
+    pdf.set_text_color(31, 73, 125)
+    pdf.cell(0, 8, "1. ACTIVIDADES DE MANTENIMIENTO (PREVENTIVO Y CORRECTIVO)", ln=True)
+    pdf.ln(2)
+
+    if not df_m.empty:
+        pdf.set_font("Arial", 'B', 9)
+        pdf.set_fill_color(0, 0, 0); pdf.set_text_color(255, 255, 255)
+        pdf.cell(25, 7, "FECHA", border=1, align='C', fill=True)
+        pdf.cell(25, 7, "TIPO", border=1, align='C', fill=True)
+        pdf.cell(145, 7, "MATRIZ / PIEZA - OPERACION", border=1, fill=True)
+        pdf.cell(20, 7, "HS", border=1, align='C', fill=True)
+        pdf.cell(25, 7, "ESTADO", border=1, align='C', ln=True, fill=True)
+        
+        pdf.set_font("Arial", '', 8)
+        total_hs_m = 0
+        for _, row in df_m.iterrows():
+            total_hs_m += row['HORAS']
+            pdf.set_fill_color(255, 255, 255); pdf.set_text_color(0, 0, 0)
+            pdf.cell(25, 6, row['FECHA'].strftime('%d/%m/%Y'), border=1, align='C')
+            pdf.cell(25, 6, row['TIPO'], border=1, align='C')
+            desc = clean_text(f"{row['MATRIZ']} - OP: {row['OPERACION']}")[:85]
+            pdf.cell(145, 6, desc, border=1)
+            pdf.cell(20, 6, f"{row['HORAS']:.1f}", border=1, align='C')
+            
+            estado = str(row['TERMINADO']).upper()
+            if "SI" in estado or "SÍ" in estado:
+                pdf.set_text_color(0, 128, 0)
+            else:
+                pdf.set_text_color(192, 0, 0)
+            pdf.cell(25, 6, clean_text(estado), border=1, align='C', ln=True)
+            
+        pdf.set_font("Arial", 'B', 9)
+        pdf.set_fill_color(220, 220, 220); pdf.set_text_color(0, 0, 0)
+        pdf.cell(195, 7, "TOTAL HORAS MANTENIMIENTO", border=1, align='R', fill=True)
+        pdf.cell(45, 7, f"{total_hs_m:.1f}", border=1, align='C', ln=True, fill=True)
+    else:
+        pdf.set_font("Arial", '', 10); pdf.set_text_color(0, 0, 0)
+        pdf.cell(0, 7, "Sin registros de mantenimiento en este periodo.", ln=True)
+    
+    pdf.ln(5)
+    
+    # 2. TABLA DE ASISTENCIA
+    pdf.set_font("Arial", 'B', 12)
+    pdf.set_text_color(31, 73, 125)
+    pdf.cell(0, 8, "2. ACTIVIDADES DE ASISTENCIA", ln=True)
+    pdf.ln(2)
+
+    if not df_a.empty:
+        pdf.set_font("Arial", 'B', 9)
+        pdf.set_fill_color(31, 73, 125); pdf.set_text_color(255, 255, 255)
+        pdf.cell(25, 7, "FECHA", border=1, align='C', fill=True)
+        pdf.cell(195, 7, "TAREA / ACTIVIDAD", border=1, fill=True)
+        pdf.cell(20, 7, "HS", border=1, align='C', ln=True, fill=True)
+        
+        pdf.set_font("Arial", '', 8); pdf.set_text_color(0, 0, 0)
+        total_hs_a = 0
+        for _, row in df_a.iterrows():
+            total_hs_a += row['HORAS']
+            pdf.cell(25, 6, row['FECHA'].strftime('%d/%m/%Y'), border=1, align='C')
+            pdf.cell(195, 6, clean_text(str(row['TAREA']))[:120], border=1)
+            pdf.cell(20, 6, f"{row['HORAS']:.1f}", border=1, align='C', ln=True)
+            
+        pdf.set_font("Arial", 'B', 9)
+        pdf.set_fill_color(220, 220, 220); pdf.set_text_color(0, 0, 0)
+        pdf.cell(220, 7, "TOTAL HORAS ASISTENCIA", border=1, align='R', fill=True)
+        pdf.cell(20, 7, f"{total_hs_a:.1f}", border=1, align='C', ln=True, fill=True)
+    else:
+        pdf.set_font("Arial", '', 10); pdf.set_text_color(0, 0, 0)
+        pdf.cell(0, 7, "Sin registros de asistencia en este periodo.", ln=True)
+        
+    # 3. CALENDARIO
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 12)
+    pdf.set_text_color(31, 73, 125)
+    pdf.cell(0, 8, "3. CALENDARIO DE HORAS", ln=True)
+    pdf.ln(2)
+    
+    delta = e_date - s_date
+    all_dates = [s_date + timedelta(days=i) for i in range(delta.days + 1)]
+    months_dict = defaultdict(list)
+    for d in all_dates: months_dict[(d.year, d.month)].append(d)
+    meses_es = ["", "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"]
+    dias_espanol = ["LUNES", "MARTES", "MIÉRCOLES", "JUEVES", "VIERNES", "SÁBADO", "DOMINGO"]
+    
+    w_day = 30 
+    total_w = 7 * w_day
+    x_offset = (297 - total_w) / 2
+    
+    for (year, month), dates_in_month in months_dict.items():
+        pdf.set_font("Arial", 'B', 11)
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(0, 8, f"MES: {meses_es[month]} {year}", ln=True)
+        
+        weeks_dict = {}
+        for d in dates_in_month:
+            w = d.isocalendar()[1]
+            if w not in weeks_dict:
+                monday = d - timedelta(days=d.weekday())
+                weeks_dict[w] = [monday + timedelta(days=i) for i in range(7)]
+
+        for week_num, full_week in weeks_dict.items():
+            if pdf.get_y() > 170:
+                pdf.add_page()
+                
+            pdf.set_x(x_offset)
+            pdf.set_font("Arial", 'B', 9)
+            pdf.set_fill_color(0, 0, 0); pdf.set_text_color(255, 255, 255)
+            pdf.cell(total_w, 6, f"SEMANA {week_num}", border=1, ln=True, align='C', fill=True)
+
+            pdf.set_x(x_offset)
+            pdf.set_fill_color(31, 73, 125)
+            for d in full_week: pdf.cell(w_day, 5, clean_text(dias_espanol[d.weekday()]), border='LTR', align='C', fill=True)
+            pdf.ln()
+            
+            pdf.set_x(x_offset)
+            for d in full_week: pdf.cell(w_day, 5, d.strftime('%d/%m/%Y'), border='LBR', align='C', fill=True)
+            pdf.ln()
+
+            pdf.set_x(x_offset)
+            pdf.set_font("Arial", 'B', 9)
+            for d in full_week:
+                val = df_d[df_d['FECHA'].dt.date == d]['TOTAL_HORAS'].sum() if not df_d.empty else 0
+                if val == 0:
+                    pdf.set_fill_color(127, 127, 127); pdf.set_text_color(255, 255, 255)
+                elif val == 8:
+                    pdf.set_fill_color(198, 239, 206); pdf.set_text_color(0, 97, 0)
+                elif val > 8:
+                    pdf.set_fill_color(255, 199, 206); pdf.set_text_color(156, 0, 6)
+                else:
+                    pdf.set_fill_color(255, 235, 156); pdf.set_text_color(156, 101, 0)
+                t_val = str(int(val)) if val == int(val) else f"{val:.1f}"
+                pdf.cell(w_day, 8, t_val, border=1, align='C', fill=True)
+            pdf.ln()
+            pdf.ln(5)
+            
+    temp_pdf = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+    pdf.output(temp_pdf.name)
+    with open(temp_pdf.name, "rb") as f:
+        pdf_bytes = f.read()
+    os.remove(temp_pdf.name)
+    return pdf_bytes
+
+
 # ==========================================
 # 7. INTERFAZ PRINCIPAL: CAJAS DE DESCARGA
 # ==========================================
@@ -875,5 +1038,55 @@ else:
                 try:
                     pdf_data = build_pdf_detailed(df_raw, df_mant_raw, df_act_raw, start_date_det, end_date_det, empresa="FAMMA", dias_habiles_custom=dias_habiles_ui)
                     st.download_button("📥 Descargar", data=pdf_data, file_name=f"Reporte_Detallado_Famma_{label_file}.pdf", mime="application/pdf", use_container_width=True)
+                except Exception as e: st.error(f"Error: {e}")
+st.markdown('</div>', unsafe_allow_html=True)
+
+
+# --- CAJA 3: REPORTE INDIVIDUAL POR MATRICERO ---
+st.markdown('<div class="section-box">', unsafe_allow_html=True)
+st.subheader("👨‍🔧 3. Reporte Individual por Matricero")
+st.write("Genera un PDF con las actividades detalladas (Preventivo, Correctivo, Asistencia) y el calendario de horas para un matricero específico.")
+
+lista_matriceros = sorted(df_raw['MATRICERO'].dropna().unique().tolist()) if not df_raw.empty else []
+
+col_mat, col_d_ini_mat, col_d_fin_mat = st.columns(3)
+with col_mat:
+    mat_seleccionado = st.selectbox("👨‍🔧 Seleccione el Matricero", lista_matriceros, key="mat_sel")
+with col_d_ini_mat:
+    start_date_mat = st.date_input("📅 Fecha de Inicio", datetime.now().date() - timedelta(days=7), key="start_mat")
+with col_d_fin_mat:
+    end_date_mat = st.date_input("📅 Fecha de Fin", datetime.now().date(), key="end_mat")
+
+if start_date_mat > end_date_mat:
+    st.error("La fecha de inicio no puede ser mayor a la fecha de fin.")
+elif not lista_matriceros:
+    st.warning("No hay datos de matriceros disponibles en este momento.")
+else:
+    label_file_mat = f"{mat_seleccionado[:10].replace(' ', '_')}_{start_date_mat.strftime('%d%m%Y')}_al_{end_date_mat.strftime('%d%m%Y')}"
+    
+    st.write("")
+    col_btn7, col_btn8, col_btn9 = st.columns(3)
+    with col_btn7:
+        if st.button("🖨️ Reporte Individual Completo", type="primary", use_container_width=True):
+            with st.spinner("Generando reporte individual..."):
+                try:
+                    pdf_data = build_pdf_matricero(df_raw, df_mant_raw, df_act_raw, start_date_mat, end_date_mat, mat_seleccionado, empresa=None)
+                    st.download_button("📥 Descargar", data=pdf_data, file_name=f"Reporte_Individual_{label_file_mat}.pdf", mime="application/pdf", use_container_width=True)
+                except Exception as e: st.error(f"Error: {e}")
+
+    with col_btn8:
+        if st.button("🖨️ Reporte Fumiscor", type="secondary", use_container_width=True):
+            with st.spinner("Generando reporte individual..."):
+                try:
+                    pdf_data = build_pdf_matricero(df_raw, df_mant_raw, df_act_raw, start_date_mat, end_date_mat, mat_seleccionado, empresa="FUMISCOR")
+                    st.download_button("📥 Descargar", data=pdf_data, file_name=f"Reporte_Individual_Fumiscor_{label_file_mat}.pdf", mime="application/pdf", use_container_width=True)
+                except Exception as e: st.error(f"Error: {e}")
+
+    with col_btn9:
+        if st.button("🖨️ Reporte Famma", type="secondary", use_container_width=True):
+            with st.spinner("Generando reporte individual..."):
+                try:
+                    pdf_data = build_pdf_matricero(df_raw, df_mant_raw, df_act_raw, start_date_mat, end_date_mat, mat_seleccionado, empresa="FAMMA")
+                    st.download_button("📥 Descargar", data=pdf_data, file_name=f"Reporte_Individual_Famma_{label_file_mat}.pdf", mime="application/pdf", use_container_width=True)
                 except Exception as e: st.error(f"Error: {e}")
 st.markdown('</div>', unsafe_allow_html=True)
