@@ -194,17 +194,20 @@ def load_data():
     if not df_calendario.empty:
         df_calendario['FECHA'] = pd.to_datetime(df_calendario['FECHA'], errors='coerce', dayfirst=True)
         df_calendario = df_calendario.dropna(subset=['FECHA'])
+        df_calendario['MATRICERO'] = df_calendario['MATRICERO'].astype(str).str.strip()
         df_calendario = df_calendario.groupby(['FECHA', 'MATRICERO', 'EMPRESA'], as_index=False)['TOTAL_HORAS'].sum()
 
     df_mantenimiento = pd.DataFrame(mant_data)
     if not df_mantenimiento.empty:
         df_mantenimiento['FECHA'] = pd.to_datetime(df_mantenimiento['FECHA'], errors='coerce', dayfirst=True)
         df_mantenimiento = df_mantenimiento.dropna(subset=['FECHA'])
+        df_mantenimiento['MATRICERO'] = df_mantenimiento['MATRICERO'].astype(str).str.strip()
 
     df_actividades = pd.DataFrame(act_data)
     if not df_actividades.empty:
         df_actividades['FECHA'] = pd.to_datetime(df_actividades['FECHA'], errors='coerce', dayfirst=True)
         df_actividades = df_actividades.dropna(subset=['FECHA'])
+        df_actividades['MATRICERO'] = df_actividades['MATRICERO'].astype(str).str.strip()
 
     return df_calendario, df_mantenimiento, df_actividades
 
@@ -781,20 +784,36 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
 
 # --- REPORTE INDIVIDUAL POR MATRICERO ---
 def build_pdf_matricero(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date, matricero, empresa=None):
-    if empresa:
-        df_m = df_mant_orig[(df_mant_orig['EMPRESA'] == empresa) & (df_mant_orig['MATRICERO'] == matricero)]
-        df_a = df_act_orig[(df_act_orig['EMPRESA'] == empresa) & (df_act_orig['MATRICERO'] == matricero)]
-        df_d = df_datos_orig[(df_datos_orig['EMPRESA'] == empresa) & (df_datos_orig['MATRICERO'] == matricero)]
-    else:
-        df_m = df_mant_orig[df_mant_orig['MATRICERO'] == matricero]
-        df_a = df_act_orig[df_act_orig['MATRICERO'] == matricero]
-        df_d = df_datos_orig[df_datos_orig['MATRICERO'] == matricero]
+    matricero_limpio = str(matricero).strip()
+    
+    # 1. Filtro estricto para Calendario (df_d)
+    df_d = df_datos_orig.copy()
+    if not df_d.empty:
+        df_d['MATRICERO'] = df_d['MATRICERO'].astype(str).str.strip()
+        mask_d = (df_d['FECHA'].dt.date >= s_date) & (df_d['FECHA'].dt.date <= e_date) & (df_d['MATRICERO'] == matricero_limpio)
+        if empresa: 
+            mask_d &= (df_d['EMPRESA'] == empresa)
+        df_d = df_d.loc[mask_d]
 
-    df_m = df_m[(df_m['FECHA'].dt.date >= s_date) & (df_m['FECHA'].dt.date <= e_date)].sort_values('FECHA')
-    df_a = df_a[(df_a['FECHA'].dt.date >= s_date) & (df_a['FECHA'].dt.date <= e_date)].sort_values('FECHA')
-    df_d = df_d[(df_d['FECHA'].dt.date >= s_date) & (df_d['FECHA'].dt.date <= e_date)]
+    # 2. Filtro estricto para Mantenimiento (df_m)
+    df_m = df_mant_orig.copy()
+    if not df_m.empty:
+        df_m['MATRICERO'] = df_m['MATRICERO'].astype(str).str.strip()
+        mask_m = (df_m['FECHA'].dt.date >= s_date) & (df_m['FECHA'].dt.date <= e_date) & (df_m['MATRICERO'] == matricero_limpio)
+        if empresa: 
+            mask_m &= (df_m['EMPRESA'] == empresa)
+        df_m = df_m.loc[mask_m].sort_values('FECHA')
 
-    pdf = PDF(s_date, e_date, empresa, title_override=f"Reporte Individual - {matricero}")
+    # 3. Filtro estricto para Asistencia (df_a)
+    df_a = df_act_orig.copy()
+    if not df_a.empty:
+        df_a['MATRICERO'] = df_a['MATRICERO'].astype(str).str.strip()
+        mask_a = (df_a['FECHA'].dt.date >= s_date) & (df_a['FECHA'].dt.date <= e_date) & (df_a['MATRICERO'] == matricero_limpio)
+        if empresa: 
+            mask_a &= (df_a['EMPRESA'] == empresa)
+        df_a = df_a.loc[mask_a].sort_values('FECHA')
+
+    pdf = PDF(s_date, e_date, empresa, title_override=f"Reporte Individual - {matricero_limpio}")
     pdf.add_page()
     
     # 1. TABLA DE MANTENIMIENTO (PREV/CORR)
@@ -1047,7 +1066,7 @@ st.markdown('<div class="section-box">', unsafe_allow_html=True)
 st.subheader("👨‍🔧 3. Reporte Individual por Matricero")
 st.write("Genera un PDF con las actividades detalladas (Preventivo, Correctivo, Asistencia) y el calendario de horas para un matricero específico.")
 
-lista_matriceros = sorted(df_raw['MATRICERO'].dropna().unique().tolist()) if not df_raw.empty else []
+lista_matriceros = sorted(df_raw['MATRICERO'].dropna().astype(str).str.strip().unique().tolist()) if not df_raw.empty else []
 
 col_mat, col_d_ini_mat, col_d_fin_mat = st.columns(3)
 with col_mat:
