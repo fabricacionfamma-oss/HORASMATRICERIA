@@ -512,6 +512,9 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
 
 # --- REPORTE DETALLADO (CALENDARIO) ---
 def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date, empresa=None, dias_habiles_custom=None):
+    s_ts = pd.to_datetime(s_date)
+    e_ts = pd.to_datetime(e_date)
+    
     if empresa:
         df_datos = df_datos_orig[df_datos_orig['EMPRESA'] == empresa].copy() if not df_datos_orig.empty else df_datos_orig
         df_mant = df_mant_orig[df_mant_orig['EMPRESA'] == empresa].copy() if not df_mant_orig.empty else df_mant_orig
@@ -529,7 +532,7 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
     for d in all_dates: months_dict[(d.year, d.month)].append(d)
 
     if not df_datos.empty:
-        mask_period = (df_datos['FECHA'].dt.date >= s_date) & (df_datos['FECHA'].dt.date <= e_date)
+        mask_period = (df_datos['FECHA'] >= s_ts) & (df_datos['FECHA'] <= e_ts)
         df_period = df_datos.loc[mask_period]
         all_matriceros = sorted(df_period['MATRICERO'].unique()) if not df_period.empty else []
     else:
@@ -722,7 +725,7 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
     pdf.ln(3)
 
     if not df_mant.empty:
-        mask_m = (df_mant['FECHA'].dt.date >= s_date) & (df_mant['FECHA'].dt.date <= e_date)
+        mask_m = (df_mant['FECHA'] >= s_ts) & (df_mant['FECHA'] <= e_ts)
         df_m_period = df_mant.loc[mask_m].copy()
         if not df_m_period.empty:
             df_m_period['MATRIZ'] = df_m_period['MATRIZ'].astype(str).str.upper().str.strip()
@@ -744,7 +747,7 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
     pdf.ln(3)
 
     if not df_act.empty:
-        mask_a = (df_act['FECHA'].dt.date >= s_date) & (df_act['FECHA'].dt.date <= e_date)
+        mask_a = (df_act['FECHA'] >= s_ts) & (df_act['FECHA'] <= e_ts)
         df_a_period = df_act.loc[mask_a].copy()
         if not df_a_period.empty:
             df_a_period['TAREA'] = df_a_period['TAREA'].astype(str).str.upper().str.strip()
@@ -784,37 +787,51 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
 
 # --- REPORTE INDIVIDUAL POR MATRICERO ---
 def build_pdf_matricero(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date, matricero, empresa=None):
-    # Forzar que el nombre que buscamos esté 100% limpio y en mayúsculas
+    # Uso seguro de Fechas en Pandas mediante Timestamp
+    s_ts = pd.to_datetime(s_date)
+    e_ts = pd.to_datetime(e_date)
+    
     mat_target = str(matricero).strip().upper()
     
+    # ESTRATEGIA INFALIBLE: Identificar el Legajo
+    # Si la cadena del matricero empieza con un número de legajo (ej. '700216'), extraemos ese número 
+    # y buscamos en la base cualquier registro que comience con él, ignorando cómo se escribió su apellido luego.
+    match_id = re.match(r'^(\d+)', mat_target)
+    
+    if match_id:
+        legajo = match_id.group(1)
+        def is_target(series):
+            # Compara sólo por el número de legajo y evita errores por nombres mal tipeados o con agregados
+            return series.astype(str).str.strip().str.upper().str.startswith(legajo)
+    else:
+        def is_target(series):
+            return series.astype(str).str.strip().str.upper() == mat_target
+
     # 1. Filtro ultra estricto para Calendario (df_d)
     df_d = pd.DataFrame()
     if not df_datos_orig.empty:
-        mask_d = (df_datos_orig['FECHA'].dt.date >= s_date) & \
-                 (df_datos_orig['FECHA'].dt.date <= e_date) & \
-                 (df_datos_orig['MATRICERO'].astype(str).str.strip().str.upper() == mat_target)
+        mask_d = (df_datos_orig['FECHA'] >= s_ts) & (df_datos_orig['FECHA'] <= e_ts) & is_target(df_datos_orig['MATRICERO'])
         if empresa: mask_d &= (df_datos_orig['EMPRESA'] == empresa)
         df_d = df_datos_orig.loc[mask_d].copy()
 
     # 2. Filtro ultra estricto para Mantenimiento (df_m)
     df_m = pd.DataFrame()
     if not df_mant_orig.empty:
-        mask_m = (df_mant_orig['FECHA'].dt.date >= s_date) & \
-                 (df_mant_orig['FECHA'].dt.date <= e_date) & \
-                 (df_mant_orig['MATRICERO'].astype(str).str.strip().str.upper() == mat_target)
+        mask_m = (df_mant_orig['FECHA'] >= s_ts) & (df_mant_orig['FECHA'] <= e_ts) & is_target(df_mant_orig['MATRICERO'])
         if empresa: mask_m &= (df_mant_orig['EMPRESA'] == empresa)
         df_m = df_mant_orig.loc[mask_m].copy().sort_values('FECHA')
 
     # 3. Filtro ultra estricto para Asistencia (df_a)
     df_a = pd.DataFrame()
     if not df_act_orig.empty:
-        mask_a = (df_act_orig['FECHA'].dt.date >= s_date) & \
-                 (df_act_orig['FECHA'].dt.date <= e_date) & \
-                 (df_act_orig['MATRICERO'].astype(str).str.strip().str.upper() == mat_target)
+        mask_a = (df_act_orig['FECHA'] >= s_ts) & (df_act_orig['FECHA'] <= e_ts) & is_target(df_act_orig['MATRICERO'])
         if empresa: mask_a &= (df_act_orig['EMPRESA'] == empresa)
         df_a = df_act_orig.loc[mask_a].copy().sort_values('FECHA')
 
-    pdf = PDF(s_date, e_date, empresa, title_override=f"Reporte Individual - {mat_target}")
+    # Limpiar el nombre a mostrar en el título
+    nombre_mostrar = f"{legajo} - {mat_target.replace(legajo, '').replace('-', '').strip()}" if match_id else mat_target
+
+    pdf = PDF(s_date, e_date, empresa, title_override=f"Reporte Individual - {nombre_mostrar}")
     pdf.add_page()
     
     # 1. TABLA DE MANTENIMIENTO (PREV/CORR)
