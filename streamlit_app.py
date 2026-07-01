@@ -568,11 +568,11 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
 
     pdf.set_fill_color(31, 73, 125)
     pdf.cell(60, 6, "MATRICERO", border=1, align='C', fill=True)
-    pdf.cell(26, 6, "AUSENCIAS (D)", border=1, align='C', fill=True)
+    pdf.cell(26, 6, "AUSENCIAS (HS)", border=1, align='C', fill=True)
     pdf.cell(32, 6, "ESTIMADO HS", border=1, align='C', fill=True)
     pdf.cell(32, 6, "HS CARGADAS", border=1, align='C', fill=True)
     pdf.set_fill_color(192, 0, 0)
-    pdf.cell(46, 6, "FALTANTE / DIFERENCIA", border=1, align='C', ln=True, fill=True)
+    pdf.cell(46, 6, "FALTANTE / DIF", border=1, align='C', ln=True, fill=True)
 
     total_estimado = total_cargadas = total_diferencia = total_ausencias = 0
     pdf.set_font("Arial", 'B', 9)
@@ -581,13 +581,19 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
         df_mat = df_period[df_period['MATRICERO'] == mat]
         reported = df_mat['TOTAL_HORAS'].sum()
         
-        # Cálculo dinámico de ausencias
-        dias_ausente = ausencias_dict.get(mat, 0.0)
+        # BÚSQUEDA ROBUSTA EN EL DICCIONARIO IGNORANDO ESPACIOS Y MAYÚSCULAS
+        dias_ausente = 0.0
+        mat_clean_compare = clean_text_standard(mat).replace(" ", "")
+        for dict_mat, dict_val in ausencias_dict.items():
+            if clean_text_standard(dict_mat).replace(" ", "") == mat_clean_compare:
+                dias_ausente = float(dict_val)
+                break
+                
         hs_ausencia = dias_ausente * 8
         estimated_hs = max(0, hs_base_estimadas - hs_ausencia)
         diff = reported - estimated_hs
 
-        total_ausencias += dias_ausente
+        total_ausencias += hs_ausencia
         total_estimado += estimated_hs
         total_cargadas += reported
         total_diferencia += diff
@@ -597,8 +603,9 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
         pdf.cell(60, 6, clean_text(mat[:35]), border=1, fill=True)
         pdf.set_fill_color(255, 255, 255)
         
-        t_aus = str(int(dias_ausente)) if dias_ausente == int(dias_ausente) else f"{dias_ausente:.1f}"
+        t_aus = str(int(hs_ausencia)) if hs_ausencia == int(hs_ausencia) else f"{hs_ausencia:.1f}"
         pdf.cell(26, 6, t_aus, border=1, align='C', fill=True)
+        
         pdf.cell(32, 6, str(estimated_hs), border=1, align='C', fill=True)
         
         t_rep = str(int(reported)) if reported == int(reported) else f"{reported:.1f}"
@@ -800,7 +807,6 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
         pdf_bytes = f.read()
     os.remove(temp_pdf.name)
     return pdf_bytes
-
 
 # --- REPORTE INDIVIDUAL POR MATRICERO ---
 def build_pdf_matricero(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date, matricero, empresa=None):
