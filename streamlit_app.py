@@ -581,11 +581,16 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
         df_mat = df_period[df_period['MATRICERO'] == mat]
         reported = df_mat['TOTAL_HORAS'].sum()
         
-        # BÚSQUEDA ROBUSTA EN EL DICCIONARIO IGNORANDO ESPACIOS Y MAYÚSCULAS
+        # BÚSQUEDA ROBUSTA POR LEGAJO (Garantiza asignar la ausencia sin importar la variación del nombre)
         dias_ausente = 0.0
-        mat_clean_compare = clean_text_standard(mat).replace(" ", "")
+        match_mat = re.match(r'^(\d+)', str(mat).strip())
+        leg_mat = match_mat.group(1) if match_mat else str(mat).strip().upper()
+        
         for dict_mat, dict_val in ausencias_dict.items():
-            if clean_text_standard(dict_mat).replace(" ", "") == mat_clean_compare:
+            match_dict = re.match(r'^(\d+)', str(dict_mat).strip())
+            leg_dict = match_dict.group(1) if match_dict else str(dict_mat).strip().upper()
+            
+            if leg_mat == leg_dict:
                 dias_ausente = float(dict_val)
                 break
                 
@@ -1048,8 +1053,20 @@ mats = set()
 if not df_raw.empty: mats.update(df_raw['MATRICERO'].dropna().astype(str).str.strip().str.upper().unique())
 if not df_mant_raw.empty: mats.update(df_mant_raw['MATRICERO'].dropna().astype(str).str.strip().str.upper().unique())
 if not df_act_raw.empty: mats.update(df_act_raw['MATRICERO'].dropna().astype(str).str.strip().str.upper().unique())
-lista_matriceros = sorted(list(mats))
 
+# Filtramos la lista para el desplegable: unificamos por legajo y nos quedamos con el nombre más largo
+legajo_map = {}
+for m in mats:
+    match = re.match(r'^(\d+)', str(m).strip())
+    if match:
+        leg = match.group(1)
+        # Si no existe el legajo en el diccionario, o si el nombre actual es más largo, lo guardamos
+        if leg not in legajo_map or len(str(m)) > len(legajo_map[leg]):
+            legajo_map[leg] = str(m).strip()
+    else:
+        legajo_map[str(m).strip()] = str(m).strip()
+
+lista_matriceros = sorted(list(legajo_map.values()))
 
 # --- CAJA 2: REPORTE DETALLADO (Rango Personalizado) ---
 st.markdown('<div class="section-box">', unsafe_allow_html=True)
