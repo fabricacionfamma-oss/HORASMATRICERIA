@@ -511,7 +511,10 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
     return pdf_bytes
 
 # --- REPORTE DETALLADO (CALENDARIO) ---
-def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date, empresa=None, dias_habiles_custom=None):
+def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date, empresa=None, dias_habiles_custom=None, ausencias_dict=None):
+    if ausencias_dict is None: 
+        ausencias_dict = {}
+
     s_ts = pd.to_datetime(s_date)
     e_ts = pd.to_datetime(e_date)
     
@@ -551,11 +554,11 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
     pdf.ln(2)
 
     working_days = dias_habiles_custom if dias_habiles_custom is not None else sum(1 for d in all_dates if d.weekday() < 5)
-    estimated_hs = working_days * 8
+    hs_base_estimadas = working_days * 8
     
     pdf.set_font("Arial", 'I', 8)
     pdf.set_text_color(100, 100, 100)
-    pdf.cell(0, 5, f"Cálculo: Se consideran {working_days} días hábiles (ajuste manual) x 8 hs = {estimated_hs} hs estimadas.", ln=True, align='L')
+    pdf.cell(0, 5, f"Cálculo: {working_days} días hábiles (ajuste manual) x 8 hs = {hs_base_estimadas} hs base. Las ausencias restan 8 hs por día.", ln=True, align='L')
     pdf.ln(2)
 
     pdf.set_font("Arial", 'B', 9)
@@ -564,30 +567,42 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
     pdf.cell(196, 6, "TABLA GENERAL DE HORAS", border=1, ln=True, align='C', fill=True)
 
     pdf.set_fill_color(31, 73, 125)
-    pdf.cell(70, 6, "MATRICERO", border=1, align='C', fill=True)
-    pdf.cell(40, 6, "ESTIMADO DE HS", border=1, align='C', fill=True)
-    pdf.cell(40, 6, "HS CARGADAS", border=1, align='C', fill=True)
+    pdf.cell(60, 6, "MATRICERO", border=1, align='C', fill=True)
+    pdf.cell(26, 6, "AUSENCIAS (D)", border=1, align='C', fill=True)
+    pdf.cell(32, 6, "ESTIMADO HS", border=1, align='C', fill=True)
+    pdf.cell(32, 6, "HS CARGADAS", border=1, align='C', fill=True)
     pdf.set_fill_color(192, 0, 0)
     pdf.cell(46, 6, "FALTANTE / DIFERENCIA", border=1, align='C', ln=True, fill=True)
 
-    total_estimado = total_cargadas = total_diferencia = 0
+    total_estimado = total_cargadas = total_diferencia = total_ausencias = 0
     pdf.set_font("Arial", 'B', 9)
+    
     for mat in all_matriceros:
         df_mat = df_period[df_period['MATRICERO'] == mat]
         reported = df_mat['TOTAL_HORAS'].sum()
+        
+        # Cálculo dinámico de ausencias
+        dias_ausente = ausencias_dict.get(mat, 0.0)
+        hs_ausencia = dias_ausente * 8
+        estimated_hs = max(0, hs_base_estimadas - hs_ausencia)
         diff = reported - estimated_hs
 
+        total_ausencias += dias_ausente
         total_estimado += estimated_hs
         total_cargadas += reported
         total_diferencia += diff
 
         pdf.set_fill_color(240, 240, 240)
         pdf.set_text_color(0, 0, 0)
-        pdf.cell(70, 6, clean_text(mat[:35]), border=1, fill=True)
+        pdf.cell(60, 6, clean_text(mat[:35]), border=1, fill=True)
         pdf.set_fill_color(255, 255, 255)
-        pdf.cell(40, 6, str(estimated_hs), border=1, align='C', fill=True)
+        
+        t_aus = str(int(dias_ausente)) if dias_ausente == int(dias_ausente) else f"{dias_ausente:.1f}"
+        pdf.cell(26, 6, t_aus, border=1, align='C', fill=True)
+        pdf.cell(32, 6, str(estimated_hs), border=1, align='C', fill=True)
+        
         t_rep = str(int(reported)) if reported == int(reported) else f"{reported:.1f}"
-        pdf.cell(40, 6, t_rep, border=1, align='C', fill=True)
+        pdf.cell(32, 6, t_rep, border=1, align='C', fill=True)
 
         if diff < 0: pdf.set_text_color(192, 0, 0) 
         elif diff > 0: pdf.set_text_color(0, 128, 0)
@@ -600,10 +615,12 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
     pdf.set_font("Arial", 'B', 9)
     pdf.set_fill_color(220, 220, 220)
     pdf.set_text_color(0, 0, 0)
-    pdf.cell(70, 7, "TOTAL GENERAL", border=1, align='R', fill=True)
-    pdf.cell(40, 7, str(int(total_estimado)), border=1, align='C', fill=True)
+    pdf.cell(60, 7, "TOTAL GENERAL", border=1, align='R', fill=True)
+    t_aus_tot = str(int(total_ausencias)) if total_ausencias == int(total_ausencias) else f"{total_ausencias:.1f}"
+    pdf.cell(26, 7, t_aus_tot, border=1, align='C', fill=True)
+    pdf.cell(32, 7, str(int(total_estimado)), border=1, align='C', fill=True)
     t_rep_tot = str(int(total_cargadas)) if total_cargadas == int(total_cargadas) else f"{total_cargadas:.1f}"
-    pdf.cell(40, 7, t_rep_tot, border=1, align='C', fill=True)
+    pdf.cell(32, 7, t_rep_tot, border=1, align='C', fill=True)
 
     if total_diferencia < 0: pdf.set_text_color(192, 0, 0) 
     elif total_diferencia > 0: pdf.set_text_color(0, 128, 0)
@@ -787,54 +804,44 @@ def build_pdf_detailed(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date,
 
 # --- REPORTE INDIVIDUAL POR MATRICERO ---
 def build_pdf_matricero(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date, matricero, empresa=None):
-    # Uso seguro de Fechas en Pandas mediante Timestamp
     s_ts = pd.to_datetime(s_date)
     e_ts = pd.to_datetime(e_date)
     
     mat_target = str(matricero).strip().upper()
     
-    # ESTRATEGIA INFALIBLE: Identificar el Legajo
-    # Si la cadena del matricero empieza con un número de legajo (ej. '700216'), extraemos ese número 
-    # y buscamos en la base cualquier registro que comience con él, ignorando cómo se escribió su apellido luego.
     match_id = re.match(r'^(\d+)', mat_target)
     
     if match_id:
         legajo = match_id.group(1)
         def is_target(series):
-            # Compara sólo por el número de legajo y evita errores por nombres mal tipeados o con agregados
             return series.astype(str).str.strip().str.upper().str.startswith(legajo)
     else:
         def is_target(series):
             return series.astype(str).str.strip().str.upper() == mat_target
 
-    # 1. Filtro ultra estricto para Calendario (df_d)
     df_d = pd.DataFrame()
     if not df_datos_orig.empty:
         mask_d = (df_datos_orig['FECHA'] >= s_ts) & (df_datos_orig['FECHA'] <= e_ts) & is_target(df_datos_orig['MATRICERO'])
         if empresa: mask_d &= (df_datos_orig['EMPRESA'] == empresa)
         df_d = df_datos_orig.loc[mask_d].copy()
 
-    # 2. Filtro ultra estricto para Mantenimiento (df_m)
     df_m = pd.DataFrame()
     if not df_mant_orig.empty:
         mask_m = (df_mant_orig['FECHA'] >= s_ts) & (df_mant_orig['FECHA'] <= e_ts) & is_target(df_mant_orig['MATRICERO'])
         if empresa: mask_m &= (df_mant_orig['EMPRESA'] == empresa)
         df_m = df_mant_orig.loc[mask_m].copy().sort_values('FECHA')
 
-    # 3. Filtro ultra estricto para Asistencia (df_a)
     df_a = pd.DataFrame()
     if not df_act_orig.empty:
         mask_a = (df_act_orig['FECHA'] >= s_ts) & (df_act_orig['FECHA'] <= e_ts) & is_target(df_act_orig['MATRICERO'])
         if empresa: mask_a &= (df_act_orig['EMPRESA'] == empresa)
         df_a = df_act_orig.loc[mask_a].copy().sort_values('FECHA')
 
-    # Limpiar el nombre a mostrar en el título
     nombre_mostrar = f"{legajo} - {mat_target.replace(legajo, '').replace('-', '').strip()}" if match_id else mat_target
 
     pdf = PDF(s_date, e_date, empresa, title_override=f"Reporte Individual - {nombre_mostrar}")
     pdf.add_page()
     
-    # 1. TABLA DE MANTENIMIENTO (PREV/CORR)
     pdf.set_font("Arial", 'B', 12)
     pdf.set_text_color(31, 73, 125)
     pdf.cell(0, 8, "1. ACTIVIDADES DE MANTENIMIENTO (PREVENTIVO Y CORRECTIVO)", ln=True)
@@ -877,7 +884,6 @@ def build_pdf_matricero(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date
     
     pdf.ln(5)
     
-    # 2. TABLA DE ASISTENCIA
     pdf.set_font("Arial", 'B', 12)
     pdf.set_text_color(31, 73, 125)
     pdf.cell(0, 8, "2. ACTIVIDADES DE ASISTENCIA", ln=True)
@@ -906,7 +912,6 @@ def build_pdf_matricero(df_datos_orig, df_mant_orig, df_act_orig, s_date, e_date
         pdf.set_font("Arial", '', 10); pdf.set_text_color(0, 0, 0)
         pdf.cell(0, 7, "Sin registros de asistencia en este periodo.", ln=True)
         
-    # 3. CALENDARIO
     pdf.add_page()
     pdf.set_font("Arial", 'B', 12)
     pdf.set_text_color(31, 73, 125)
@@ -1032,6 +1037,13 @@ with col_btn3:
             except Exception as e: st.error(f"Error: {e}")
 st.markdown('</div>', unsafe_allow_html=True)
 
+# --- OBTENER LISTA GLOBAL DE MATRICEROS ---
+mats = set()
+if not df_raw.empty: mats.update(df_raw['MATRICERO'].dropna().astype(str).str.strip().str.upper().unique())
+if not df_mant_raw.empty: mats.update(df_mant_raw['MATRICERO'].dropna().astype(str).str.strip().str.upper().unique())
+if not df_act_raw.empty: mats.update(df_act_raw['MATRICERO'].dropna().astype(str).str.strip().str.upper().unique())
+lista_matriceros = sorted(list(mats))
+
 
 # --- CAJA 2: REPORTE DETALLADO (Rango Personalizado) ---
 st.markdown('<div class="section-box">', unsafe_allow_html=True)
@@ -1044,9 +1056,19 @@ with col_d_ini:
 with col_d_fin:
     end_date_det = st.date_input("📅 Fecha de Fin", datetime.now().date(), key="end_det")
 with col_d_hab:
-    # Calcula los días hábiles matemáticos para usar de valor sugerido
     dias_defecto = sum(1 for i in range((end_date_det - start_date_det).days + 1) if (start_date_det + timedelta(days=i)).weekday() < 5) if end_date_det >= start_date_det else 0
     dias_habiles_ui = st.number_input("🛠️ Días Hábiles (reales)", min_value=0, value=dias_defecto, step=1, help="Resta los feriados si los hubo")
+
+ausencias_config = {}
+with st.expander("📝 Registrar Ausencias por Matricero (Opcional)"):
+    st.write("Seleccione los matriceros que tuvieron ausencias en el periodo y asigne los días (se restarán 8hs por día de su estimación):")
+    mats_ausentes = st.multiselect("Seleccionar matriceros:", lista_matriceros, key="mats_ausentes_sel")
+    
+    if mats_ausentes:
+        cols_aus = st.columns(3)
+        for i, mat_aus in enumerate(mats_ausentes):
+            with cols_aus[i % 3]:
+                ausencias_config[mat_aus] = st.number_input(f"Días de {mat_aus}", min_value=0.0, step=0.5, value=1.0, key=f"aus_{mat_aus}")
 
 if start_date_det > end_date_det:
     st.error("La fecha de inicio no puede ser mayor a la fecha de fin.")
@@ -1059,7 +1081,7 @@ else:
         if st.button("🖨️ Detallado Completo", type="primary", use_container_width=True):
             with st.spinner("Generando reporte..."):
                 try:
-                    pdf_data = build_pdf_detailed(df_raw, df_mant_raw, df_act_raw, start_date_det, end_date_det, empresa=None, dias_habiles_custom=dias_habiles_ui)
+                    pdf_data = build_pdf_detailed(df_raw, df_mant_raw, df_act_raw, start_date_det, end_date_det, empresa=None, dias_habiles_custom=dias_habiles_ui, ausencias_dict=ausencias_config)
                     st.download_button("📥 Descargar", data=pdf_data, file_name=f"Reporte_Detallado_{label_file}.pdf", mime="application/pdf", use_container_width=True)
                 except Exception as e: st.error(f"Error: {e}")
 
@@ -1067,7 +1089,7 @@ else:
         if st.button("🖨️ Detallado Fumiscor", type="secondary", use_container_width=True):
             with st.spinner("Generando reporte..."):
                 try:
-                    pdf_data = build_pdf_detailed(df_raw, df_mant_raw, df_act_raw, start_date_det, end_date_det, empresa="FUMISCOR", dias_habiles_custom=dias_habiles_ui)
+                    pdf_data = build_pdf_detailed(df_raw, df_mant_raw, df_act_raw, start_date_det, end_date_det, empresa="FUMISCOR", dias_habiles_custom=dias_habiles_ui, ausencias_dict=ausencias_config)
                     st.download_button("📥 Descargar", data=pdf_data, file_name=f"Reporte_Detallado_Fumiscor_{label_file}.pdf", mime="application/pdf", use_container_width=True)
                 except Exception as e: st.error(f"Error: {e}")
 
@@ -1075,7 +1097,7 @@ else:
         if st.button("🖨️ Detallado Famma", type="secondary", use_container_width=True):
             with st.spinner("Generando reporte..."):
                 try:
-                    pdf_data = build_pdf_detailed(df_raw, df_mant_raw, df_act_raw, start_date_det, end_date_det, empresa="FAMMA", dias_habiles_custom=dias_habiles_ui)
+                    pdf_data = build_pdf_detailed(df_raw, df_mant_raw, df_act_raw, start_date_det, end_date_det, empresa="FAMMA", dias_habiles_custom=dias_habiles_ui, ausencias_dict=ausencias_config)
                     st.download_button("📥 Descargar", data=pdf_data, file_name=f"Reporte_Detallado_Famma_{label_file}.pdf", mime="application/pdf", use_container_width=True)
                 except Exception as e: st.error(f"Error: {e}")
 st.markdown('</div>', unsafe_allow_html=True)
@@ -1085,12 +1107,6 @@ st.markdown('</div>', unsafe_allow_html=True)
 st.markdown('<div class="section-box">', unsafe_allow_html=True)
 st.subheader("👨‍🔧 3. Reporte Individual por Matricero")
 st.write("Genera un PDF con las actividades detalladas (Preventivo, Correctivo, Asistencia) y el calendario de horas para un matricero específico.")
-
-mats = set()
-if not df_raw.empty: mats.update(df_raw['MATRICERO'].dropna().astype(str).str.strip().str.upper().unique())
-if not df_mant_raw.empty: mats.update(df_mant_raw['MATRICERO'].dropna().astype(str).str.strip().str.upper().unique())
-if not df_act_raw.empty: mats.update(df_act_raw['MATRICERO'].dropna().astype(str).str.strip().str.upper().unique())
-lista_matriceros = sorted(list(mats))
 
 col_mat, col_d_ini_mat, col_d_fin_mat = st.columns(3)
 with col_mat:
