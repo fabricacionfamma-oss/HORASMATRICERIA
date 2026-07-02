@@ -299,7 +299,8 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
         df_mant, df_act = df_mant_orig.copy(), df_act_orig.copy()
 
     df_mant_anual = df_mant[df_mant['FECHA'].dt.year == s_date.year] if not df_mant.empty else pd.DataFrame()
-    df_act_anual = df_act[df_act['FECHA'].dt.year == s_date.year] if not df_act_anual.empty else pd.DataFrame()
+    # LA LÍNEA CORREGIDA ESTÁ AQUÍ
+    df_act_anual = df_act[df_act['FECHA'].dt.year == s_date.year] if not df_act.empty else pd.DataFrame()
 
     df_mant_mes = df_mant_anual[(df_mant_anual['FECHA'].dt.date >= s_date) & (df_mant_anual['FECHA'].dt.date <= e_date)] if not df_mant_anual.empty else pd.DataFrame()
     df_act_mes = df_act_anual[(df_act_anual['FECHA'].dt.date >= s_date) & (df_act_anual['FECHA'].dt.date <= e_date)] if not df_act_anual.empty else pd.DataFrame()
