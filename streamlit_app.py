@@ -299,7 +299,6 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
         df_mant, df_act = df_mant_orig.copy(), df_act_orig.copy()
 
     df_mant_anual = df_mant[df_mant['FECHA'].dt.year == s_date.year] if not df_mant.empty else pd.DataFrame()
-    # LA LÍNEA CORREGIDA ESTÁ AQUÍ
     df_act_anual = df_act[df_act['FECHA'].dt.year == s_date.year] if not df_act.empty else pd.DataFrame()
 
     df_mant_mes = df_mant_anual[(df_mant_anual['FECHA'].dt.date >= s_date) & (df_mant_anual['FECHA'].dt.date <= e_date)] if not df_mant_anual.empty else pd.DataFrame()
@@ -422,8 +421,9 @@ def build_pdf_dashboard(df_mant_orig, df_act_orig, s_date, e_date, mes_nombre, e
     
     with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_trend, \
          tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_pie:
-        fig_trend.write_image(tmp_trend.name, engine="kaleido")
-        fig_pie.write_image(tmp_pie.name, engine="kaleido")
+        # AQUÍ SE HA QUITADO EL engine="kaleido"
+        fig_trend.write_image(tmp_trend.name)
+        fig_pie.write_image(tmp_pie.name)
         
         pdf.image(tmp_trend.name, x=5, y=y_charts, w=190)
         pdf.image(tmp_pie.name, x=195, y=y_charts, w=95)
